@@ -9,6 +9,7 @@ Source0:    %{name}-%{version}.tar.bz2
 BuildRequires:  pkgconfig(Qt5Core)
 BuildRequires:  pkgconfig(Qt5Sql)
 BuildRequires:  pkgconfig(Qt5DBus)
+BuildRequires:	libp11-devel
 
 %description
 %{summary}.
@@ -220,6 +221,7 @@ cp -R lib/Crypto/doc/html/* %{buildroot}/%{_docdir}/Sailfish/Crypto/
 %files -n sailfishcryptodaemonplugins
 %defattr(-,root,root,-)
 %{_libdir}/Sailfish/Crypto/libsailfishcrypto-openssl.so
+%{_libdir}/Sailfish/Crypto/libsailfishcryptoki.so
 
 %files -n qt5-plugin-sqldriver-sqlcipher
 %defattr(-,root,root,-)
