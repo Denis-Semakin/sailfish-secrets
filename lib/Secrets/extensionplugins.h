@@ -51,6 +51,13 @@ public:
     virtual Sailfish::Secrets::EncryptionPlugin::EncryptionType encryptionType() const = 0;
     virtual Sailfish::Secrets::EncryptionPlugin::EncryptionAlgorithm encryptionAlgorithm() const = 0;
 
+    virtual bool supportsLocking() const;
+    virtual bool isLocked() const;
+    virtual bool lock();
+    virtual bool unlock(const QByteArray &lockCode);
+    virtual bool setLockCode(const QByteArray &oldLockCode, const QByteArray &newLockCode);
+
+    virtual Sailfish::Secrets::Result deriveKeyFromCode(const QByteArray &authenticationCode, const QByteArray &salt, QByteArray *key) = 0;
     virtual Sailfish::Secrets::Result encryptSecret(const QByteArray &plaintext, const QByteArray &key, QByteArray *encrypted) = 0;
     virtual Sailfish::Secrets::Result decryptSecret(const QByteArray &encrypted, const QByteArray &key, QByteArray *plaintext) = 0;
 };
@@ -102,6 +109,12 @@ public:
     virtual QString name() const = 0;
     virtual Sailfish::Secrets::StoragePlugin::StorageType storageType() const = 0;
 
+    virtual bool supportsLocking() const;
+    virtual bool isLocked() const;
+    virtual bool lock();
+    virtual bool unlock(const QByteArray &lockCode);
+    virtual bool setLockCode(const QByteArray &oldLockCode, const QByteArray &newLockCode);
+
     virtual Sailfish::Secrets::Result createCollection(const QString &collectionName) = 0;
     virtual Sailfish::Secrets::Result removeCollection(const QString &collectionName) = 0;
     virtual Sailfish::Secrets::Result setSecret(const QString &collectionName, const QString &hashedSecretName, const QByteArray &encryptedSecretName, const QByteArray &secret, const Sailfish::Secrets::Secret::FilterData &filterData) = 0;
@@ -150,10 +163,17 @@ public:
     virtual Sailfish::Secrets::EncryptionPlugin::EncryptionType encryptionType() const = 0;
     virtual Sailfish::Secrets::EncryptionPlugin::EncryptionAlgorithm encryptionAlgorithm() const = 0;
 
+    virtual bool supportsLocking() const;
+    virtual bool isLocked() const;
+    virtual bool lock();
+    virtual bool unlock(const QByteArray &lockCode);
+    virtual bool setLockCode(const QByteArray &oldLockCode, const QByteArray &newLockCode);
+
     virtual Sailfish::Secrets::Result createCollection(const QString &collectionName, const QByteArray &key) = 0;
     virtual Sailfish::Secrets::Result removeCollection(const QString &collectionName) = 0;
 
     virtual Sailfish::Secrets::Result isLocked(const QString &collectionName, bool *locked) = 0;
+    virtual Sailfish::Secrets::Result deriveKeyFromCode(const QByteArray &authenticationCode, const QByteArray &salt, QByteArray *key) = 0;
     virtual Sailfish::Secrets::Result setEncryptionKey(const QString &collectionName, const QByteArray &key) = 0;
     virtual Sailfish::Secrets::Result reencrypt(const QString &collectionName, const QByteArray &oldkey, const QByteArray &newkey) = 0;
 
@@ -218,6 +238,12 @@ public:
     virtual QString name() const = 0;
     virtual Sailfish::Secrets::AuthenticationPlugin::AuthenticationTypes authenticationTypes() const = 0;
     virtual Sailfish::Secrets::InteractionParameters::InputTypes inputTypes() const = 0;
+
+    virtual bool supportsLocking() const;
+    virtual bool isLocked() const;
+    virtual bool lock();
+    virtual bool unlock(const QByteArray &lockCode);
+    virtual bool setLockCode(const QByteArray &oldLockCode, const QByteArray &newLockCode);
 
     virtual Sailfish::Secrets::Result beginAuthentication(
             uint callerPid,

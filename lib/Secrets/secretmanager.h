@@ -28,6 +28,7 @@ class DeleteCollectionRequest;
 class DeleteSecretRequest;
 class FindSecretsRequest;
 class InteractionRequest;
+class PluginInfoRequest;
 class StoredSecretRequest;
 class StoreSecretRequest;
 class InteractionView;
@@ -53,7 +54,8 @@ public:
 
     enum DeviceLockUnlockSemantic {
         DeviceLockKeepUnlocked = 0,         // unlock after first successful device unlock, stay unlocked.  e.g. background processes.
-        DeviceLockRelock,                   // unlock on device unlock, relock on device lock.
+        DeviceLockVerifyLock,               // unlock on device unlock, relock on device lock requiring verify (not passphrase) to unlock on subsequent access.
+        DeviceLockRelock,                   // unlock on device unlock, relock on device lock requiring passphrase to unlock on subsequent access.
     };
     Q_ENUM(DeviceLockUnlockSemantic)
 
@@ -64,13 +66,6 @@ public:
         CustomLockAccessRelock,             // unlock and relock on every successful access (with UI flow).
     };
     Q_ENUM(CustomLockUnlockSemantic)
-
-    enum InitialisationMode {
-        AsynchronousInitialisationMode = 0, // initialise the in-memory cache of plugin info asynchronously after construction
-        MinimalInitialisationMode,          // the application intends to use default or well-known values, no need to initialise cache
-        SynchronousInitialisationMode       // initialise the in-memory cache of plugin info synchronously in constructor
-    };
-    Q_ENUM(InitialisationMode)
 
     enum FilterOperator {
         OperatorOr  = Sailfish::Secrets::StoragePlugin::OperatorOr,
@@ -84,19 +79,13 @@ public:
     static const QString DefaultEncryptionPluginName;
     static const QString DefaultEncryptedStoragePluginName;
 
-    SecretManager(Sailfish::Secrets::SecretManager::InitialisationMode mode = AsynchronousInitialisationMode, QObject *parent = Q_NULLPTR);
+    SecretManager(QObject *parent = Q_NULLPTR);
     ~SecretManager();
 
     bool isInitialised() const;
 
     // for In-Process UI flows via ApplicationSpecificAuthentication plugins only.
     void registerInteractionView(Sailfish::Secrets::InteractionView *view);
-
-    // cached information about available storage/encryption/encryptedstorage/authentication plugins.
-    QMap<QString, Sailfish::Secrets::StoragePluginInfo> storagePluginInfo();
-    QMap<QString, Sailfish::Secrets::EncryptionPluginInfo> encryptionPluginInfo();
-    QMap<QString, Sailfish::Secrets::EncryptedStoragePluginInfo> encryptedStoragePluginInfo();
-    QMap<QString, Sailfish::Secrets::AuthenticationPluginInfo> authenticationPluginInfo();
 
 Q_SIGNALS:
     void isInitialisedChanged();
@@ -113,6 +102,8 @@ private:
     friend class DeleteSecretRequest;
     friend class FindSecretsRequest;
     friend class InteractionRequest;
+    friend class LockCodeRequest;
+    friend class PluginInfoRequest;
     friend class StoredSecretRequest;
     friend class StoreSecretRequest;
 };
