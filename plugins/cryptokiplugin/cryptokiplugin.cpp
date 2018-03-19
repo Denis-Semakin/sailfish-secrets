@@ -12,32 +12,47 @@
  * All rights reserved.
  */
 
-#include "Crypto/key.h"
-#include "Crypto/certificate.h"
-#include "Crypto/generaterandomdatarequest.h"
-#include "Crypto/seedrandomdatageneratorrequest.h"
-#include "cryptokiplugin.h"
+#include <cstdlib>
 
+#include <QtCore/QDebug>
 #include <QtCore/QByteArray>
 #include <QtCore/QMap>
 #include <QtCore/QVector>
 #include <QtCore/QString>
 #include <QtCore/QUuid>
 #include <QtCore/QCryptographicHash>
+#include <QLoggingCategory>
 
-#include <fstream>
-#include <cstdlib>
+#include "Crypto/key.h"
+#include "Crypto/certificate.h"
+#include "Crypto/generaterandomdatarequest.h"
+#include "Crypto/seedrandomdatageneratorrequest.h"
+#include "cryptokiplugin.h"
 
-//TODO: Need Initialize() method
-#define	P11LOADER_FUNC(func) \
-    (loader)->GetFunctions()->func
+#define bufferSize	(4 * 4096)
+#define	P11LOADER_FUNC(func)	(loader)->GetFunctions()->func
 
 Q_PLUGIN_METADATA(IID Sailfish_Crypto_CryptoPlugin_IID)
 
 using namespace Sailfish::Crypto;
+namespace {
+    const CK_BYTE STR_CRYPTO_PRO_A[] = {
+	0x06, 0x07, 0x2A, 0x85, 0x03, 0x02, 0x02, 0x23, 0x01
+    };
+
+    const CK_BYTE STR_CRYPTO_PRO_GOST3411[] = {
+	0x06, 0x07, 0x2A, 0x85, 0x03, 0x02, 0x02, 0x1E, 0x01
+    };
+
+    CK_BYTE STR_CRYPTO_PRO_GOST28147_A[] = {
+	0x06, 0x07, 0x2a, 0x85, 0x03, 0x02, 0x02, 0x1f, 0x01
+    };
+
+    const int SIGNSIZE = 64;
+} // anonymous namespace
 
 Daemon::Plugins::CryptokiPlugin::CryptokiPlugin(QObject *parent)
-    : QObject(parent), CryptoPlugin(), loader(&LibLoader::GetLibLoader())
+    : QObject(parent), CryptoPlugin()
 {
 
 }
@@ -80,13 +95,6 @@ Daemon::Plugins::CryptokiPlugin::generateAndStoreKey(
 	CKM_GOSTR3410_KEY_PAIR_GEN, NULL_PTR, 0
     };
 
-    CK_BYTE STR_CRYPTO_PRO_A[] = {
-	0x06, 0x07, 0x2A, 0x85, 0x03, 0x02, 0x02, 0x23, 0x01
-    };
-    CK_BYTE STR_CRYPTO_PRO_GOST3411[] = {
-	0x06, 0x07, 0x2A, 0x85, 0x03, 0x02, 0x02, 0x1E, 0x01
-    };
-
     // Secret Key attributes
     // Note! All attributes can be and/or should be set up by &kpgParams for
     // example
@@ -120,21 +128,24 @@ Daemon::Plugins::CryptokiPlugin::generateAndStoreKey(
     // Keys descriptors
     CK_OBJECT_HANDLE hPublicKey, hPrivateKey;
 
-    CK_RV ret = P11LOADER_FUNC(
-		C_GenerateKeyPair(loader->getSession(), &mech,
-				  &pubKeyAttribs[0],
-				  sizeof(pubKeyAttribs) /sizeof(CK_ATTRIBUTE),
-				  &privKeyAttribs[0],
-				  sizeof(privKeyAttribs)/sizeof(CK_ATTRIBUTE),
-				  &hPublicKey, &hPrivateKey));
+    CK_RV ret = P11LOADER_FUNC(C_GenerateKeyPair(
+			       loader->getSession(),
+			       &mech,
+			       &pubKeyAttribs[0],
+			       sizeof(pubKeyAttribs) /sizeof(CK_ATTRIBUTE),
+			       &privKeyAttribs[0],
+			       sizeof(privKeyAttribs)/sizeof(CK_ATTRIBUTE),
+			       &hPublicKey, &hPrivateKey));
     if (ret != CKR_OK)
     {
-	std::cerr << "Error: " << loader->CKErr2Str(ret) << std::endl;
+	qCCritical(lcLibLoader) << "Error: " << loader->CKErr2Str(ret);
 	return Result(Result::Failed);
     }
 
-    QByteArray PublicKeyData  = QByteArray::number(static_cast<qulonglong>(hPublicKey));
-    QByteArray PrivateKeyData = QByteArray::number(static_cast<qulonglong>(hPrivateKey));
+    const QByteArray PublicKeyData  =
+	    QByteArray::number(static_cast<qulonglong>(hPublicKey));
+    const QByteArray PrivateKeyData =
+	    QByteArray::number(static_cast<qulonglong>(hPrivateKey));
 
     keyMetadata->setPublicKey(PublicKeyData);
     keyMetadata->setPrivateKey(PrivateKeyData);
@@ -180,7 +191,7 @@ Daemon::Plugins::CryptokiPlugin::storedKey(
 						 sizeof(KeySearchAttribs) / sizeof(CK_ATTRIBUTE)));
     if (ret != CKR_OK)
     {
-	std::cerr << "Error: " << loader->CKErr2Str(ret) << std::endl;
+	qCCritical(lcLibLoader) << "Error: " << loader->CKErr2Str(ret);
 	return Result(Result::Failed);
     }
 
@@ -188,23 +199,23 @@ Daemon::Plugins::CryptokiPlugin::storedKey(
 					    &KeyHandle, 1, &KeyobjCount));
     if (ret != CKR_OK)
     {
-	std::cerr << "Error: " << loader->CKErr2Str(ret) << std::endl;
+	qCCritical(lcLibLoader) << "Error: " << loader->CKErr2Str(ret);
 	return Result(Result::Failed);
     }
 
     ret = P11LOADER_FUNC(C_FindObjectsFinal(loader->getSession()));
     if (ret != CKR_OK)
     {
-	std::cerr << "Error: " << loader->CKErr2Str(ret) << std::endl;
+	qCCritical(lcLibLoader) << "Error: " << loader->CKErr2Str(ret);
 	return Result(Result::Failed);
     }
 
     if (!KeyobjCount) {
-	    std::cerr << "No key found" << std::endl;
+	    qCCritical(lcLibLoader) << "No key found";
 	    return Result(Result::Failed);
     }
 
-    QByteArray KeyData  = QByteArray::number(static_cast<qulonglong>(KeyHandle));
+    const QByteArray KeyData  = QByteArray::number(static_cast<qulonglong>(KeyHandle));
     key->setSecretKey(KeyData);
 
     return Result(Result::Succeeded);
@@ -241,7 +252,7 @@ Daemon::Plugins::CryptokiPlugin::generateRandomData(
 			numberBytes));
 	if (ret != CKR_OK)
 	{
-		std::cerr << "Error: " << loader->CKErr2Str(ret) << std::endl;
+		qCCritical(lcLibLoader) << "Error: " << loader->CKErr2Str(ret);
 		return Result(Result::Failed);
 	}
 
@@ -280,13 +291,6 @@ Daemon::Plugins::CryptokiPlugin::generateKey(
 	CK_BBOOL	bFalse = CK_FALSE;
 	CK_MECHANISM	mech = {
 	    CKM_GOSTR3410_KEY_PAIR_GEN, NULL_PTR, 0
-	};
-
-	CK_BYTE		STR_CRYPTO_PRO_A[] = {
-	    0x06, 0x07, 0x2A, 0x85, 0x03, 0x02, 0x02, 0x23, 0x01
-	};
-	CK_BYTE		STR_CRYPTO_PRO_GOST3411[] = {
-	    0x06, 0x07, 0x2A, 0x85, 0x03, 0x02, 0x02, 0x1E, 0x01
 	};
 
 	// Secret Key attributes
@@ -334,13 +338,13 @@ Daemon::Plugins::CryptokiPlugin::generateKey(
 				      &hPublicKey, &hPrivateKey));
 	if (ret != CKR_OK)
 	{
-		std::cerr << "Error: " << loader->CKErr2Str(ret) << std::endl;
+		qCCritical(lcLibLoader) << "Error: " << loader->CKErr2Str(ret);
 		return Result(Result::Failed);
 	}
 
-	QByteArray PublicKeyData  =
+	const QByteArray PublicKeyData  =
 		QByteArray::number(static_cast<qulonglong>(hPublicKey));
-	QByteArray PrivateKeyData =
+	const QByteArray PrivateKeyData =
 		QByteArray::number(static_cast<qulonglong>(hPrivateKey));
 
 	key->setPublicKey(PublicKeyData);
@@ -350,25 +354,23 @@ Daemon::Plugins::CryptokiPlugin::generateKey(
     {
 	CK_OBJECT_HANDLE SessionKeyHandle;
 	CK_MECHANISM mech = {CKM_GOST28147_KEY_GEN, NULL, 0};
-	CK_BYTE STR_CRYPTO_PRO_GOST28147_A[] = {0x06, 0x07, 0x2a, 0x85, 0x03,
-						0x02, 0x02, 0x1f, 0x01};
 	CK_ATTRIBUTE KeyTemplate[] = {
 		{CKA_GOST28147_PARAMS, STR_CRYPTO_PRO_GOST28147_A, sizeof(STR_CRYPTO_PRO_GOST28147_A)},
 		{CKA_ENCRYPT, &bTrue, sizeof(bTrue)},
 		{CKA_EXTRACTABLE, &bTrue, sizeof(bTrue)}
 	};
 
-	CK_RV ret = P11LOADER_FUNC(C_GenerateKey(loader->getSession(),
+	const CK_RV ret = P11LOADER_FUNC(C_GenerateKey(loader->getSession(),
 						      &mech, KeyTemplate,
 			sizeof(KeyTemplate) / sizeof(CK_ATTRIBUTE),
 			&SessionKeyHandle));
 	if (ret != CKR_OK)
 	{
-	    std::cerr << "Error: " << loader->CKErr2Str(ret) << std::endl;
+	    qCCritical(lcLibLoader) << "Error: " << loader->CKErr2Str(ret);
 	    return Result(Result::Failed);
 	}
 
-	QByteArray KeyData = QByteArray::number(static_cast<qulonglong>(SessionKeyHandle));
+	const QByteArray KeyData = QByteArray::number(static_cast<qulonglong>(SessionKeyHandle));
 	key->setSecretKey(KeyData);
     }
 
@@ -389,7 +391,7 @@ Daemon::Plugins::CryptokiPlugin::sign(
 //	    return Result(Result::UnsupportedOperation,
 //			 QLatin1String("The plugin supports only GOST"));
 
-    char sign[64];
+    char sign[SIGNSIZE];
     CK_ULONG nSignatureLength = sizeof(sign);
 
     //NOTE: One should choose a correct mech from in params
@@ -402,20 +404,33 @@ Daemon::Plugins::CryptokiPlugin::sign(
 					  &mech, hPrivateKey));
     if (ret != CKR_OK)
     {
-	std::cerr << "Error: " << loader->CKErr2Str(ret) << std::endl;
+	qCCritical(lcLibLoader) << "Error: " << loader->CKErr2Str(ret);
 	return Result(Result::Failed);
     }
 
-    CK_BYTE_PTR
-    Data2Sign = reinterpret_cast<CK_BYTE_PTR>(const_cast<char *>(data.data()));
+    int dataSize = data.length();
+    unsigned char buf[bufferSize];
+
+    while (dataSize > 0) {
+	int operationSize = dataSize >= bufferSize ? bufferSize : dataSize;
+	memcpy(buf, data.data(), operationSize);
+	ret = P11LOADER_FUNC(C_SignUpdate(loader->getSession(), buf,
+					  operationSize));
+	if (ret != CKR_OK)
+	{
+	    qCCritical(lcLibLoader) << "Error: " << loader->CKErr2Str(ret);
+	    return Result(Result::Failed);
+	}
+	dataSize -= operationSize;
+    }
 
     CK_BYTE_PTR pSign = reinterpret_cast<CK_BYTE_PTR>(sign);
 
-    ret = P11LOADER_FUNC(C_Sign(loader->getSession(), Data2Sign,
-				data.length(), pSign, &nSignatureLength));
+    ret = P11LOADER_FUNC(C_SignFinal(loader->getSession(), pSign,
+				     &nSignatureLength));
     if (ret != CKR_OK)
     {
-	std::cerr << "Error: " << loader->CKErr2Str(ret) << std::endl;
+	qCCritical(lcLibLoader) << "Error: " << loader->CKErr2Str(ret);
 	return Result(Result::Failed);
     }
 
@@ -445,22 +460,37 @@ Daemon::Plugins::CryptokiPlugin::verify(
 	CKM_GOSTR3410_WITH_GOSTR3411_2012_256, nullptr, 0
     };
 
+    *verified = false;
+
     CK_RV ret = P11LOADER_FUNC(C_VerifyInit(loader->getSession(),
 					    &mech, hPublicKey));
     if (ret != CKR_OK)
     {
-	std::cerr << "Error: " << loader->CKErr2Str(ret) << std::endl;
+	qCCritical(lcLibLoader) << "Error: " << loader->CKErr2Str(ret);
 	return Result(Result::Failed);
     }
 
-    CK_BYTE_PTR
-    Data2Verify = reinterpret_cast<CK_BYTE_PTR>(const_cast<char *>(data.data()));
+    int dataSize = data.length();
+    unsigned char buf[bufferSize];
 
-    CK_BYTE_PTR
-    Sign = reinterpret_cast<CK_BYTE_PTR>(const_cast<char *>(signature.data()));
+    while (dataSize > 0) {
+	int operationSize = dataSize >= bufferSize ? bufferSize : dataSize;
+	memcpy(buf, data.data(), operationSize);
+	ret = P11LOADER_FUNC(C_VerifyUpdate(loader->getSession(), buf,
+					    operationSize));
+	if (ret != CKR_OK)
+	{
+	    qCCritical(lcLibLoader) << "Error: " << loader->CKErr2Str(ret);
+	    return Result(Result::Failed);
+	}
+	dataSize -= operationSize;
+    }
 
-    ret = P11LOADER_FUNC(C_Verify(loader->getSession(), Data2Verify,
-				  data.length(), Sign, signature.length()));
+    std::vector<unsigned char> sign(signature.length());
+    memcpy(sign.data(), signature.data(), signature.length());
+
+    ret = P11LOADER_FUNC(C_VerifyFinal(loader->getSession(), sign.data(),
+				       signature.length()));
     if (ret != CKR_OK)
     {
 	*verified = false;
@@ -469,7 +499,7 @@ Daemon::Plugins::CryptokiPlugin::verify(
 	    return Result(Result::Succeeded);
 	}
 
-	std::cerr << "Error: " << loader->CKErr2Str(ret) << std::endl;
+	qCCritical(lcLibLoader) << "Error: " << loader->CKErr2Str(ret);
 	return Result(Result::Failed);
     }
 
@@ -491,11 +521,12 @@ Daemon::Plugins::CryptokiPlugin::encrypt(
     Q_UNUSED(padding);
 
     long unsigned int iv_length = static_cast<long unsigned int>(iv.length());
-    char *iv_data = const_cast<char *>(iv.data());
+    std::vector<char> iv_data(iv.length());
+    memcpy(iv_data.data(), iv.data(), iv.length());
 
     CK_MECHANISM mech = {
 	CKM_GOST28147, //can be configuired, may be by blockMode
-	iv_data,
+	iv_data.data(),
 	iv_length
     };
 
@@ -503,12 +534,12 @@ Daemon::Plugins::CryptokiPlugin::encrypt(
 					     key.secretKey().toULong()));
     if (ret != CKR_OK)
     {
-	std::cerr << "Error: " << loader->CKErr2Str(ret) << std::endl;
+	qCCritical(lcLibLoader) << "Error: " << loader->CKErr2Str(ret);
 	return Result(Result::Failed);
     }
 
-    CK_BYTE_PTR
-    PlainText = reinterpret_cast<CK_BYTE_PTR>(const_cast<char *>(data.data()));
+    std::vector<unsigned char> PlainText(data.length());
+    memcpy(PlainText.data(), data.data(), data.length());
 
     CK_ULONG
     PlainTextLen = static_cast<CK_ULONG>(data.length());
@@ -518,12 +549,12 @@ Daemon::Plugins::CryptokiPlugin::encrypt(
 
     CK_ULONG EncDataLen;
 
-    ret = P11LOADER_FUNC(C_Encrypt(loader->getSession(), PlainText,
+    ret = P11LOADER_FUNC(C_Encrypt(loader->getSession(), PlainText.data(),
 				   PlainTextLen, EncData, &EncDataLen));
 
     if (ret != CKR_OK)
     {
-	std::cerr << "Error: " << loader->CKErr2Str(ret) << std::endl;
+	qCCritical(lcLibLoader) << "Error: " << loader->CKErr2Str(ret);
 	return Result(Result::Failed);
     }
 
@@ -543,11 +574,12 @@ Daemon::Plugins::CryptokiPlugin::decrypt(
     Q_UNUSED(padding);
 
     long unsigned int iv_length = static_cast<long unsigned int>(iv.length());
-    char *iv_data = const_cast<char *>(iv.data());
+    std::vector<char> iv_data(iv.length());
+    memcpy(iv_data.data(), iv.data(), iv.length());
 
     CK_MECHANISM mech = {
 	CKM_GOST28147, //Can be configuired I suppose, may be by blockMode
-	iv_data,
+	iv_data.data(),
 	iv_length
     };
 
@@ -555,27 +587,26 @@ Daemon::Plugins::CryptokiPlugin::decrypt(
 					     key.secretKey().toULong()));
     if (ret != CKR_OK)
     {
-	std::cerr << "Error: " << loader->CKErr2Str(ret) << std::endl;
+	qCCritical(lcLibLoader) << "Error: " << loader->CKErr2Str(ret);
 	return Result(Result::Failed);
     }
 
-    CK_BYTE_PTR
-    EncData = reinterpret_cast<CK_BYTE_PTR>(const_cast<char *>(data.data()));
+    std::vector<unsigned char> EncData(data.length());
+    memcpy(EncData.data(), data.data(), data.length());
 
     CK_ULONG
     EncDataLen = static_cast<CK_ULONG>(data.length());
 
     CK_BYTE_PTR
     PlainText = reinterpret_cast<CK_BYTE_PTR>(decrypted->data());
-    CK_ULONG	PlainTextLen;
+    CK_ULONG PlainTextLen;
 
-
-    ret = P11LOADER_FUNC(C_Decrypt(loader->getSession(), EncData,
+    ret = P11LOADER_FUNC(C_Decrypt(loader->getSession(), EncData.data(),
 				   EncDataLen, PlainText, &PlainTextLen));
 
     if (ret != CKR_OK)
     {
-	std::cerr << "Error: " << loader->CKErr2Str(ret) << std::endl;
+	qCCritical(lcLibLoader) << "Error: " << loader->CKErr2Str(ret);
 	return Result(Result::Failed);
     }
 
@@ -592,7 +623,7 @@ Daemon::Plugins::CryptokiPlugin::calculateDigest(
     Q_UNUSED(padding)
 
     long unsigned int len = 0;
-    char dig[65] = {0};
+    char dig[SIGNSIZE] = {0};
     CK_MECHANISM mech;
 
     mech.pParameter = NULL_PTR;
@@ -602,44 +633,87 @@ Daemon::Plugins::CryptokiPlugin::calculateDigest(
     {
 	case CryptoManager::DigestFunction::DigestGost94:
 	     mech.mechanism = CKM_GOSTR3411;
-	     len = 32;
+	     len = SIGNSIZE / 2;
 	     break;
 	case CryptoManager::DigestFunction::DigestGost12_256:
 	     mech.mechanism = CKM_GOSTR3411_12_256;
-	     len = 32;
+	     len = SIGNSIZE / 2;
 	     break;
 	case CryptoManager::DigestFunction::DigestGost12_512:
 	     mech.mechanism = CKM_GOSTR3411_12_512;
-	     len = 64;
+	     len = SIGNSIZE;
 	     break;
 	default:
 	     return Result(Result::UnsupportedOperation,
 			   QLatin1String("The Cryptoki plugin supports ONLY GOST"));
-
     }
 
     CK_RV ret = P11LOADER_FUNC(C_DigestInit(loader->getSession(), &mech));
     if (ret != CKR_OK)
     {
-	std::cerr << "Error: " << loader->CKErr2Str(ret) << std::endl;
+	qCCritical(lcLibLoader) << "Error: " << loader->CKErr2Str(ret);
 	return Result(Result::Failed);
     }
 
-    CK_BYTE_PTR
-    Data = reinterpret_cast<CK_BYTE_PTR>(const_cast<char *>(data.data()));
+    int dataSize = data.length();
+    unsigned char buf[bufferSize];
 
-    ret = P11LOADER_FUNC(C_Digest(loader->getSession(),
-				  Data,
-				  data.length(),
-				  reinterpret_cast<unsigned char *>(dig),
-				  &len));
+    while (dataSize > 0) {
+	int operationSize = dataSize >= bufferSize ? bufferSize : dataSize;
+	memcpy(buf, data.data(), operationSize);
+	ret = P11LOADER_FUNC(C_DigestUpdate(loader->getSession(), buf,
+					    operationSize));
+	if (ret != CKR_OK)
+	{
+	    qCCritical(lcLibLoader) << "Error: " << loader->CKErr2Str(ret);
+	    return Result(Result::Failed);
+	}
+	dataSize -= operationSize;
+    }
+
+    ret = P11LOADER_FUNC(C_DigestFinal(loader->getSession(),
+				       reinterpret_cast<unsigned char *>(dig),
+				       &len));
     if (ret != CKR_OK)
     {
-	std::cerr << "Error: " << loader->CKErr2Str(ret) << std::endl;
+	qCCritical(lcLibLoader) << "Error: " << loader->CKErr2Str(ret);
 	return Result(Result::Failed);
     }
 
     digest->append(dig, len);
 
     return Result(Result::Succeeded);
+}
+
+bool
+Daemon::Plugins::CryptokiPlugin::supportsLocking() const
+{
+    return true;
+}
+
+bool
+Daemon::Plugins::CryptokiPlugin::isLocked() const
+{
+    return !loader->IsInitialized();
+}
+
+bool
+Daemon::Plugins::CryptokiPlugin::lock()
+{
+    return loader->lock();
+}
+
+bool
+Daemon::Plugins::CryptokiPlugin::unlock(const QByteArray &lockCode)
+{
+    loader.reset(new LibLoader);
+
+    return loader->unlock(lockCode);
+}
+
+bool
+Daemon::Plugins::CryptokiPlugin::setLockCode(const QByteArray &oldLockCode,
+					     const QByteArray &newLockCode)
+{
+    return loader->setLockCode(oldLockCode, newLockCode);
 }

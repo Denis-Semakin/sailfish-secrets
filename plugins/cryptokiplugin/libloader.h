@@ -7,55 +7,56 @@
  * All rights reserved.
  */
 
-#ifndef _LIB_LOADER_H
-#define _LIB_LOADER_H
+#ifndef LIB_LOADER_H
+#define LIB_LOADER_H
 
 #include <iostream>
 #include <string>
+#include <memory>
 
 #include <pkcs11.h>
+#include <QtCore/QLoggingCategory>
+
+Q_DECLARE_LOGGING_CATEGORY(lcLibLoader)
+#define PKCS11_FUNC(func)	loader.GetFunctions()->func
+
+using Handle = std::unique_ptr<void, std::function<void(void*)>>;
 
 class LibLoader
 {
-private:
-	bool	m_Initialized;
-	void	*m_Handle;
-
-	CK_SLOT_ID      SlotId;
-	CK_TOKEN_INFO   tokenInfo;
-	CK_SESSION_HANDLE   hSession;
-
-	CK_FUNCTION_LIST_PTR m_pFunctions;
-
 public:
-	LibLoader();
-	~LibLoader();
+    LibLoader();
+    ~LibLoader();
 
-	CK_FUNCTION_LIST_PTR GetFunctions() const
-	{
-		return m_pFunctions;
-	}
+    inline CK_FUNCTION_LIST_PTR GetFunctions() const noexcept
+    {
+        return m_pFunctions;
+    }
 
-	bool IsInitialized() const
-	{
-		return m_Initialized;
-	}
+    inline bool IsInitialized() const noexcept
+    {
+        return m_Initialized;
+    }
 
-	void *GetHandle()
-	{
-		return m_Handle;
-	}
+    inline CK_SESSION_HANDLE getSession() const noexcept
+    {
+        return hSession;
+    }
 
-	CK_SESSION_HANDLE getSession() const
-	{
-		return hSession;
-	}
+    const char * CKErr2Str(const CK_ULONG res);
+    bool lock();
+    bool unlock(const QByteArray &code);
+    bool setLockCode(const QByteArray &oldCode, const QByteArray &newCode);
 
-	std::string CKErr2Str(CK_ULONG res);
+private:
+   bool m_Initialized;
+   Handle m_Handle;
 
-	static LibLoader& GetLibLoader();
+   CK_SLOT_ID         slotId;
+   CK_TOKEN_INFO      tokenInfo;
+   CK_SESSION_HANDLE  hSession;
+
+   CK_FUNCTION_LIST_PTR m_pFunctions;
 };
 
-#define PKCS11_FUNC(func)	loader.GetFunctions()->func
-
-#endif	// _LIB_LOADER_H
+#endif	// LIB_LOADER_H

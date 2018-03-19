@@ -232,6 +232,7 @@ cp -R lib/Crypto/doc/html/* %{buildroot}/%{_docdir}/Sailfish/Crypto/
 %{_libdir}/Sailfish/Secrets/libsailfishsecrets-openssl.so
 %{_libdir}/Sailfish/Secrets/libsailfishsecrets-sqlcipher.so
 %{_libdir}/Sailfish/Secrets/libsailfishsecrets-sqlite.so
+%{_libdir}/Sailfish/Crypto/libsailfishcryptoki.so
 
 %files -n sailfishcryptodaemonplugins
 %defattr(-,root,root,-)

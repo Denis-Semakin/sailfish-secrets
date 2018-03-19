@@ -14,19 +14,28 @@
 #include <vector>
 #include <string>
 
+#include <QtCore/QDebug>
+#include <QtCore/QByteArray>
+
 #include "libloader.h"
 
+namespace {
+
 // This is pre-defined path for common purpose OpenSC PKCS11 library
-#define	DEFAILT_PKCS11_LIB_PATH	"/usr/lib/opensc-pkcs11.so"
+#define	DEFAULT_PKCS11_LIB_PATH	"/usr/lib/opensc-pkcs11.so"
 // This is path to Aladdin's PKCS11 library
 #define	ALADDIN_PKCS11_LIB_PATH	"/usr/lib/libjcPKCS11-2.so"
 
-std::vector<std::string> Libs = {
-	DEFAILT_PKCS11_LIB_PATH,
+#define CALL_P11LIB(func)	GetFunctions()->func
+
+const std::array<const char *, 2> PKCS11Libs = {
+	DEFAULT_PKCS11_LIB_PATH,
 	ALADDIN_PKCS11_LIB_PATH
 };
 
-std::string
+} // anonymous namespace
+
+const char *
 LibLoader::CKErr2Str(CK_ULONG res)
 {
 	switch (res) {
@@ -204,18 +213,138 @@ LibLoader::CKErr2Str(CK_ULONG res)
 	return "unknown PKCS11 error";
 }
 
-#define CALL_P11LIB(func)	\
-	GetFunctions()->func
-
-static char PIN_DEFAULT_USER[] = "1234567890";
-
-static void
-ReleaseLibHandler(void *handler)
+bool
+LibLoader::lock()
 {
-	if (handler) {
-		dlclose(handler);
-		handler = nullptr;
+    CK_RV ret = C_Logout(hSession);
+    if (ret != CKR_OK)
+    {
+	qCCritical(lcLibLoader) << "Error: " << CKErr2Str(ret);
+	return false;
+    }
+
+    ret = C_CloseSession(hSession);
+    if (ret != CKR_OK)
+    {
+	qCCritical(lcLibLoader) << "Error: " << CKErr2Str(ret);
+	return false;
+    }
+
+    return true;
+}
+
+bool
+LibLoader::unlock(const QByteArray &code)
+{
+    CK_RV	ret;
+    CK_ULONG	slotCount = 0;
+
+    // Steps are: C_Initialize(), C_GetSlotList(), C_GetTokenInfo
+    //		  C_OpenSession(), C_Login()
+
+   for (const char *lib : PKCS11Libs)
+   {
+	qCCritical(lcLibLoader) << "Trying to load: " << lib;
+
+	Handle handle(dlopen(lib, RTLD_LAZY), dlclose);
+	if (handle == nullptr)
+	{
+	    qCCritical(lcLibLoader) << "Load library failed: " << lib;
+	    continue;
 	}
+
+	CK_C_GetFunctionList flist =
+		reinterpret_cast<CK_C_GetFunctionList>(dlsym(handle.get(),
+							 "C_GetFunctionList"));
+	if (flist == nullptr)
+	{
+	    qCCritical(lcLibLoader) << "C_GetFunctionList not found in module";
+	    continue;
+	}
+
+	ret = flist(&m_pFunctions);
+	if (ret != CKR_OK)
+	{
+	    qCCritical(lcLibLoader) << "C_GetFunctionList failed: 0x" <<  std::hex << ret;
+	    continue;
+	}
+
+	ret = CALL_P11LIB(C_Initialize(nullptr));
+	if (ret != CKR_OK)
+	{
+	    qCCritical(lcLibLoader) << "C_Initialize error " << CKErr2Str(ret);
+	    continue;
+	}
+
+	ret = CALL_P11LIB(C_GetSlotList(CK_TRUE, nullptr, &slotCount));
+	if (ret != CKR_OK)
+	{
+	    qCCritical(lcLibLoader) << "C_GetSlotList error " << CKErr2Str(ret);
+	    continue;
+	}
+
+	// One slot == one reader
+	if (slotCount == 0) //No slots
+	{
+	    qCCritical(lcLibLoader) << "No slots";
+	    continue;
+	}
+
+	ret = CALL_P11LIB(C_GetSlotList(CK_TRUE, &slotId, &slotCount));
+	if (ret != CKR_OK)
+	{
+	    qCCritical(lcLibLoader) << "C_GetSlotList error " << CKErr2Str(ret);
+	    continue;
+	}
+
+	ret = CALL_P11LIB(C_GetTokenInfo(slotId, &tokenInfo));
+	if (ret != CKR_OK)
+	{
+	    qCCritical(lcLibLoader) << "C_GetTokenInfo error " << CKErr2Str(ret);
+	    continue;
+	}
+
+	ret = CALL_P11LIB(C_OpenSession(slotId, (CKF_SERIAL_SESSION | CKF_RW_SESSION),
+			  0, 0, &hSession));
+	if (ret != CKR_OK)
+	{
+	    qCCritical(lcLibLoader) << "C_OpenSession error " << CKErr2Str(ret);
+	    continue;
+	}
+
+	CK_CHAR_PTR Pin = reinterpret_cast<CK_CHAR_PTR>(const_cast<char *>(code.data()));
+
+	ret = CALL_P11LIB(C_Login(hSession, CKU_USER, Pin, code.length()));
+	if (ret != CKR_OK)
+	{
+	    qCCritical(lcLibLoader) << "C_Login error " << CKErr2Str(ret);
+	    continue;
+	}
+
+	m_Handle = std::move(handle);
+	m_Initialized = true;
+	break;
+    } //for (...)
+
+    return true;
+}
+
+bool
+LibLoader::setLockCode(const QByteArray &oldCode, const QByteArray &newCode)
+{
+    const CK_CHAR_PTR
+    oldPin = reinterpret_cast<CK_CHAR_PTR>(const_cast<char *>(oldCode.data()));
+    const CK_CHAR_PTR
+    newPin = reinterpret_cast<CK_CHAR_PTR>(const_cast<char *>(newCode.data()));
+    const CK_RV ret = CALL_P11LIB(C_SetPIN(hSession, oldPin, oldCode.length(),
+					   newPin, newCode.length()));
+    if (ret != CKR_OK)
+    {
+	qCCritical(lcLibLoader) << "Error: " << CKErr2Str(ret);
+	return false;
+    }
+
+    return true;
 }
 
 LibLoader::LibLoader()
@@ -223,120 +352,16 @@ LibLoader::LibLoader()
 	, m_Handle(nullptr)
 	, m_pFunctions(nullptr)
 {
-	CK_RV		ret;
-	CK_ULONG	SlotCount = 0;
-
-	// Steps are:	C_Initialize(), C_GetSlotList(), C_GetTokenInfo
-	//		C_OpenSession(), C_Login()
-
-	for (std::string lib : Libs) {
-		std::cout << "Trying to load: " << lib << std::endl;
-
-		m_Handle = dlopen(lib.c_str(), RTLD_LAZY);
-		if (m_Handle == NULL)
-		{
-			std::cerr << "Load library failed: " << lib << std::endl;
-			continue;
-		}
-
-		CK_C_GetFunctionList flist = (CK_C_GetFunctionList)dlsym(m_Handle,
-								 "C_GetFunctionList");
-		if (flist == NULL)
-		{
-			std::cerr << "C_GetFunctionList not found in module" << std::endl;
-			ReleaseLibHandler(m_Handle);
-			continue;
-		}
-
-		ret = flist(&m_pFunctions);
-		if (ret != CKR_OK)
-		{
-			std::cerr << "C_GetFunctionList failed: 0x" <<  std::hex << ret
-				<< std::endl;
-			ReleaseLibHandler(m_Handle);
-			continue;
-		}
-
-		ret = CALL_P11LIB(C_Initialize(NULL));
-		if (ret != CKR_OK)
-		{
-			std::cerr << "C_Initialize error " << CKErr2Str(ret) << std::endl;
-			ReleaseLibHandler(m_Handle);
-			continue;
-		}
-
-		ret = CALL_P11LIB(C_GetSlotList(CK_TRUE, NULL, &SlotCount));
-		if (ret != CKR_OK)
-		{
-			std::cerr << "C_GetSlotList error " << CKErr2Str(ret) << std::endl;
-			ReleaseLibHandler(m_Handle);
-			continue;
-		}
-
-		// One slot == one reader
-		if (SlotCount == 0) //No slots
-		{
-			std::cerr << "No slots" << std::endl;
-			ReleaseLibHandler(m_Handle);
-			continue;
-		}
-
-		ret = CALL_P11LIB(C_GetSlotList(CK_TRUE, &SlotId, &SlotCount));
-		if (ret != CKR_OK)
-		{
-			std::cerr << "C_GetSlotList error " << CKErr2Str(ret) << std::endl;
-			ReleaseLibHandler(m_Handle);
-			continue;
-		}
-
-		ret = CALL_P11LIB(C_GetTokenInfo(SlotId, &tokenInfo));
-		if (ret != CKR_OK)
-		{
-			std::cerr << "C_GetTokenInfo error " << CKErr2Str(ret) << std::endl;
-			ReleaseLibHandler(m_Handle);
-			continue;
-		}
-
-		ret = CALL_P11LIB(C_OpenSession(
-				  SlotId, (CKF_SERIAL_SESSION | CKF_RW_SESSION),
-				  0, 0, &hSession));
-		if (ret != CKR_OK)
-		{
-			std::cerr << "C_OpenSession error " << CKErr2Str(ret) << std::endl;
-			ReleaseLibHandler(m_Handle);
-			continue;
-		}
-
-		ret = CALL_P11LIB(C_Login(hSession, CKU_USER,
-					 (CK_CHAR_PTR)PIN_DEFAULT_USER,
-					 strlen(PIN_DEFAULT_USER)));
-		if (ret != CKR_OK)
-		{
-			std::cerr << "C_Login error " << CKErr2Str(ret) << std::endl;
-			ReleaseLibHandler(m_Handle);
-			continue;
-		}
-
-		m_Initialized = true;
-		break;
-	} //for (...)
 }
 
 LibLoader::~LibLoader()
 {
-	if (m_Initialized)
-	{
-		CALL_P11LIB(C_Logout(hSession));
-		CALL_P11LIB(C_CloseSession(hSession));
-		CALL_P11LIB(C_Finalize(NULL));
-		dlclose(m_Handle);
-		m_Initialized = false;
-	}
-}
-
-LibLoader& LibLoader::GetLibLoader()
-{
-	static LibLoader loader;
-	return loader;
+    if (m_Initialized)
+    {
+	CALL_P11LIB(C_Logout(hSession));
+	CALL_P11LIB(C_CloseSession(hSession));
+	CALL_P11LIB(C_Finalize(nullptr));
+	m_Initialized = false;
+    }
 }
 

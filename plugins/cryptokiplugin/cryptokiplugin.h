@@ -15,14 +15,16 @@
 #ifndef SAILFISHCRYPTO_PLUGIN_CRYPTOKI_H
 #define SAILFISHCRYPTO_PLUGIN_CRYPTOKI_H
 
+#include <memory>
+
+#include <QtCore/QObject>
+#include <QtCore/QByteArray>
+#include <QtCore/QCryptographicHash>
+#include <QtCore/QMap>
+
 #include "Crypto/extensionplugins.h"
 #include "libloader.h"
 #include "tk26.h"
-
-#include <QObject>
-#include <QByteArray>
-#include <QCryptographicHash>
-#include <QMap>
 
 class CipherSessionData;
 class QTimer;
@@ -169,10 +171,13 @@ public:
             QByteArray *generatedData,
             bool *verified) Q_DECL_OVERRIDE;
 
-private:
-    //QByteArray aes_encrypt_plaintext(const QByteArray &plaintext, const QByteArray &key, const QByteArray &init_vector);
-    //QByteArray aes_decrypt_ciphertext(const QByteArray &ciphertext, const QByteArray &key, const QByteArray &init_vector);
+    bool supportsLocking() const Q_DECL_OVERRIDE;
+    bool isLocked() const Q_DECL_OVERRIDE;
+    bool lock() Q_DECL_OVERRIDE;
+    bool unlock(const QByteArray &lockCode) Q_DECL_OVERRIDE;
+    bool setLockCode(const QByteArray &oldLockCode, const QByteArray &newLockCode) Q_DECL_OVERRIDE;
 
+private:
     Sailfish::Crypto::Key getFullKey(const Sailfish::Crypto::Key &key);
     QMap<quint64, QMap<quint32, CipherSessionData*> > m_cipherSessions; // clientId to token to data
     struct CipherSessionLookup {
@@ -181,7 +186,7 @@ private:
         quint64 clientId = 0;
     };
     QMap<QTimer *, CipherSessionLookup> m_cipherSessionTimeouts;
-    LibLoader *loader;
+    std::unique_ptr<LibLoader> loader;
 };
 
 } // namespace Plugins
