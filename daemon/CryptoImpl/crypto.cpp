@@ -483,6 +483,9 @@ Daemon::ApiImpl::CryptoRequestQueue::CryptoRequestQueue(
 {
     CryptoDaemonConnection::registerDBusTypes();
 
+    m_cryptoThreadPool = QSharedPointer<QThreadPool>::create();
+    m_cryptoThreadPool->setMaxThreadCount(1);
+    m_cryptoThreadPool->setExpiryTimeout(-1);
     m_requestProcessor = new Daemon::ApiImpl::RequestProcessor(secrets, autotestMode, this);
     if (!m_requestProcessor->loadPlugins()) {
         qCWarning(lcSailfishCryptoDaemon) << "Crypto: failed to load plugins!";
@@ -495,6 +498,11 @@ Daemon::ApiImpl::CryptoRequestQueue::CryptoRequestQueue(
 
 Daemon::ApiImpl::CryptoRequestQueue::~CryptoRequestQueue()
 {
+}
+
+QWeakPointer<QThreadPool> Daemon::ApiImpl::CryptoRequestQueue::cryptoThreadPool()
+{
+    return m_cryptoThreadPool.toWeakRef();
 }
 
 QMap<QString, Sailfish::Crypto::CryptoPlugin*>
