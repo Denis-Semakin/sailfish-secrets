@@ -219,6 +219,8 @@ EcKeyPairGenerationParameters::EcKeyPairGenerationParameters()
     : KeyPairGenerationParameters()
 {
     setKeyPairType(KeyPairGenerationParameters::KeyPairEc);
+    // TODO: is this a good default choice?
+    setEllipticCurve(CryptoManager::CurveSecp521r1);
 }
 
 /*!
