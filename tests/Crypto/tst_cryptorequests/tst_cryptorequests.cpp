@@ -92,6 +92,7 @@ private slots:
     void generateKeyEncryptDecrypt();
     void validateCertificateChain();
     void signVerify();
+    void signVerify_data();
     void calculateDigest();
     void storedKeyRequests_data();
     void storedKeyRequests();
@@ -108,7 +109,6 @@ private:
     void addCryptoTestData()
     {
         QTest::addColumn<CryptoManager::BlockMode>("blockMode");
-        QTest::addColumn<int>("keySize");
 
         QTest::newRow("ECB 128-bit") << CryptoManager::BlockModeEcb << 128;
         QTest::newRow("ECB 192-bit") << CryptoManager::BlockModeEcb << 192;
@@ -392,29 +392,50 @@ void tst_cryptorequests::validateCertificateChain()
     QSKIP("TODO - certificate validation not yet implemented!");
 }
 
+void tst_cryptorequests::signVerify_data()
+{
+    QTest::addColumn<CryptoManager::Algorithm>("algorithm");
+
+    QTest::newRow("RSA") << CryptoManager::AlgorithmRsa;
+    QTest::newRow("EC") << CryptoManager::AlgorithmEc;
+}
+
+static inline KeyPairGenerationParameters *getKeyPairGenerationParameters(CryptoManager::Algorithm algorithm)
+{
+    switch (algorithm)
+    {
+    case CryptoManager::AlgorithmRsa:
+        return new RsaKeyPairGenerationParameters();
+    case CryptoManager::AlgorithmEc:
+        return new EcKeyPairGenerationParameters();
+    default:
+        throw std::runtime_error("Unknown algorithm");
+    }
+}
+
 void tst_cryptorequests::signVerify()
 {
-    // Generate RSA key for signing
+    QFETCH(CryptoManager::Algorithm, algorithm);
+
+    KeyPairGenerationParameters *keyPairGenParams = getKeyPairGenerationParameters(algorithm);
+
+    // Generate key for signing
     // ----------------------------
 
     // Create key template
     Key keyTemplate;
-    keyTemplate.setSize(1024);
-    keyTemplate.setAlgorithm(CryptoManager::AlgorithmRsa);
+    keyTemplate.setAlgorithm(algorithm);
     keyTemplate.setOrigin(Key::OriginDevice);
     keyTemplate.setOperations(CryptoManager::OperationSign);
     keyTemplate.setFilterData(QLatin1String("test"), QLatin1String("true"));
 
-    // Create key pair generation params, make sure it's valid
-    RsaKeyPairGenerationParameters keyPairGenParams;
-    keyPairGenParams.setModulusLength(1024);
-    keyPairGenParams.setKeyPairType(KeyPairGenerationParameters::KeyPairRsa);
-    QVERIFY2(keyPairGenParams.isValid(), "Key pair generation params are invalid.");
+    // Key pair generation params, make sure it's valid
+    QVERIFY2(keyPairGenParams->isValid(), "Key pair generation params are invalid.");
 
     // Create generate key request, execute, make sure it's okay
     GenerateKeyRequest gkr;
     gkr.setManager(&cm);
-    gkr.setKeyPairGenerationParameters(keyPairGenParams);
+    gkr.setKeyPairGenerationParameters(*keyPairGenParams);
     gkr.setKeyTemplate(keyTemplate);
     gkr.setCryptoPluginName(DEFAULT_TEST_CRYPTO_PLUGIN_NAME);
     gkr.startRequest();
@@ -426,6 +447,8 @@ void tst_cryptorequests::signVerify()
     Key fullKey = gkr.generatedKey();
     QVERIFY(!fullKey.privateKey().isEmpty());
     QVERIFY(!fullKey.publicKey().isEmpty());
+
+    delete keyPairGenParams;
 
     // Sign a test plaintext
     // ----------------------------
