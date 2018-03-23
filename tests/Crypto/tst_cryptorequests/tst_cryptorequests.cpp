@@ -45,6 +45,9 @@
 #include "Secrets/findsecretsrequest.h"
 #include "Secrets/storedsecretrequest.h"
 
+// Needed for the calculateDigest tests
+Q_DECLARE_METATYPE(QCryptographicHash::Algorithm);
+
 using namespace Sailfish::Crypto;
 
 // Cannot use waitForFinished() for some replies, as ui flows require user interaction / event handling.
@@ -94,6 +97,7 @@ private slots:
     void signVerify();
     void signVerify_data();
     void calculateDigest();
+    void calculateDigest_data();
     void storedKeyRequests_data();
     void storedKeyRequests();
     void storedDerivedKeyRequests_data();
@@ -395,9 +399,13 @@ void tst_cryptorequests::validateCertificateChain()
 void tst_cryptorequests::signVerify_data()
 {
     QTest::addColumn<CryptoManager::Algorithm>("algorithm");
+    QTest::addColumn<CryptoManager::DigestFunction>("digestFunction");
 
-    QTest::newRow("RSA") << CryptoManager::AlgorithmRsa;
-    QTest::newRow("EC") << CryptoManager::AlgorithmEc;
+    QTest::newRow("RSA + SHA256") << CryptoManager::AlgorithmRsa << CryptoManager::DigestSha256;
+    QTest::newRow("RSA + SHA512") << CryptoManager::AlgorithmRsa << CryptoManager::DigestSha512;
+    QTest::newRow("RSA + MD5") << CryptoManager::AlgorithmRsa << CryptoManager::DigestMd5;
+    QTest::newRow("EC + SHA256") << CryptoManager::AlgorithmEc << CryptoManager::DigestSha256;
+    QTest::newRow("EC + SHA512") << CryptoManager::AlgorithmEc << CryptoManager::DigestSha512;
 }
 
 static inline KeyPairGenerationParameters *getKeyPairGenerationParameters(CryptoManager::Algorithm algorithm)
@@ -416,6 +424,7 @@ static inline KeyPairGenerationParameters *getKeyPairGenerationParameters(Crypto
 void tst_cryptorequests::signVerify()
 {
     QFETCH(CryptoManager::Algorithm, algorithm);
+    QFETCH(CryptoManager::DigestFunction, digestFunction);
 
     KeyPairGenerationParameters *keyPairGenParams = getKeyPairGenerationParameters(algorithm);
 
@@ -464,8 +473,8 @@ void tst_cryptorequests::signVerify()
     QCOMPARE(sr.key(), fullKey);
     sr.setPadding(CryptoManager::SignaturePaddingNone);
     QCOMPARE(sr.padding(), CryptoManager::SignaturePaddingNone);
-    sr.setDigestFunction(CryptoManager::DigestSha256);
-    QCOMPARE(sr.digestFunction(), CryptoManager::DigestSha256);
+    sr.setDigestFunction(digestFunction);
+    QCOMPARE(sr.digestFunction(), digestFunction);
     sr.setData(plaintext);
     QCOMPARE(sr.data(), plaintext);
     sr.setCryptoPluginName(DEFAULT_TEST_CRYPTO_PLUGIN_NAME);
@@ -500,8 +509,8 @@ void tst_cryptorequests::signVerify()
     QCOMPARE(vr.data(), plaintext);
     vr.setSignature(signature);
     QCOMPARE(vr.signature(), signature);
-    vr.setDigestFunction(CryptoManager::DigestSha256);
-    QCOMPARE(vr.digestFunction(), CryptoManager::DigestSha256);
+    vr.setDigestFunction(digestFunction);
+    QCOMPARE(vr.digestFunction(), digestFunction);
     vr.setPadding(CryptoManager::SignaturePaddingNone);
     QCOMPARE(vr.padding(), CryptoManager::SignaturePaddingNone);
     vr.setCryptoPluginName(DEFAULT_TEST_CRYPTO_PLUGIN_NAME);
@@ -521,8 +530,21 @@ void tst_cryptorequests::signVerify()
     QCOMPARE(vr.verified(), true);
 }
 
+void tst_cryptorequests::calculateDigest_data()
+{
+    QTest::addColumn<CryptoManager::DigestFunction>("digestFunction");
+    QTest::addColumn<QCryptographicHash::Algorithm>("cryptographicHashAlgorithm");
+
+    QTest::newRow("SHA256") << CryptoManager::DigestSha256 << QCryptographicHash::Sha256;
+    QTest::newRow("SHA512") << CryptoManager::DigestSha512 << QCryptographicHash::Sha512;
+    QTest::newRow("MD5") << CryptoManager::DigestMd5 << QCryptographicHash::Md5;
+}
+
 void tst_cryptorequests::calculateDigest()
 {
+    QFETCH(CryptoManager::DigestFunction, digestFunction);
+    QFETCH(QCryptographicHash::Algorithm, cryptographicHashAlgorithm);
+
     QByteArray plaintext = "Test plaintext data";
 
     CalculateDigestRequest cdr;
@@ -532,8 +554,8 @@ void tst_cryptorequests::calculateDigest()
     QCOMPARE(cdr.status(), Request::Inactive);
     cdr.setData(plaintext);
     QCOMPARE(cdr.data(), plaintext);
-    cdr.setDigestFunction(CryptoManager::DigestSha256);
-    QCOMPARE(cdr.digestFunction(), CryptoManager::DigestSha256);
+    cdr.setDigestFunction(digestFunction);
+    QCOMPARE(cdr.digestFunction(), digestFunction);
     cdr.setPadding(CryptoManager::SignaturePaddingNone);
     QCOMPARE(cdr.padding(), CryptoManager::SignaturePaddingNone);
     cdr.setCryptoPluginName(DEFAULT_TEST_CRYPTO_PLUGIN_NAME);
@@ -554,7 +576,7 @@ void tst_cryptorequests::calculateDigest()
 
     QByteArray digest = cdr.digest();
     QVERIFY2(digest.length() != 0, "Calculated digest should NOT be empty.");
-    QCOMPARE(digest, QCryptographicHash::hash(plaintext, QCryptographicHash::Sha256));
+    QCOMPARE(digest, QCryptographicHash::hash(plaintext, cryptographicHashAlgorithm));
 }
 
 void tst_cryptorequests::storedKeyRequests_data()
