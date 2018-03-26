@@ -142,7 +142,8 @@ Daemon::Plugins::OpenSslCryptoPlugin::supportedBlockModes() const
                         << Sailfish::Crypto::CryptoManager::BlockModeCfb8
                         << Sailfish::Crypto::CryptoManager::BlockModeCfb128
                         << Sailfish::Crypto::CryptoManager::BlockModeOfb
-                        << Sailfish::Crypto::CryptoManager::BlockModeCtr);
+                        << Sailfish::Crypto::CryptoManager::BlockModeCtr
+                        << Sailfish::Crypto::CryptoManager::BlockModeGcm);
     return retn;
 }
 
@@ -612,6 +613,21 @@ Daemon::Plugins::OpenSslCryptoPlugin::encrypt(
         Sailfish::Crypto::CryptoManager::EncryptionPadding padding,
         QByteArray *encrypted)
 {
+    return execEncrypt(false, data, iv, key, blockMode, padding, QByteArray(), encrypted, nullptr);
+}
+
+Sailfish::Crypto::Result
+Daemon::Plugins::OpenSslCryptoPlugin::execEncrypt(
+        bool authenticate,
+        const QByteArray &data,
+        const QByteArray &iv,
+        const Sailfish::Crypto::Key &key,
+        Sailfish::Crypto::CryptoManager::BlockMode blockMode,
+        Sailfish::Crypto::CryptoManager::EncryptionPadding padding,
+        const QByteArray &authenticationData,
+        QByteArray *encrypted,
+        QByteArray *tag)
+{
     Sailfish::Crypto::Key fullKey = getFullKey(key);
     if (fullKey.secretKey().isEmpty()) {
         return Sailfish::Crypto::Result(Sailfish::Crypto::Result::EmptySecretKey,
@@ -640,10 +656,24 @@ Daemon::Plugins::OpenSslCryptoPlugin::encrypt(
     }
 
     // encrypt plaintext
-    QByteArray ciphertext = aes_encrypt_plaintext(blockMode, data, fullKey.secretKey(), iv);
+    QByteArray returnedTag;
+    QByteArray ciphertext;
+    if (authenticate) {
+        ciphertext = aes_auth_encrypt_plaintext(blockMode, data, fullKey.secretKey(), iv, authenticationData, &returnedTag);
+    } else {
+        ciphertext = aes_encrypt_plaintext(blockMode, data, fullKey.secretKey(), iv);
+    }
 
     // return result
     if (ciphertext.size()) {
+        if (authenticate && tag) {
+            if (returnedTag.size()) {
+                *tag = returnedTag;
+            } else {
+                return Sailfish::Crypto::Result(Sailfish::Crypto::Result::CryptoPluginEncryptionError,
+                                                QLatin1String("OpenSSL crypto plugin failed to encrypt the data - no tag created"));
+            }
+        }
         *encrypted = ciphertext;
         return Sailfish::Crypto::Result(Sailfish::Crypto::Result::Succeeded);
     }
@@ -692,6 +722,20 @@ Daemon::Plugins::OpenSslCryptoPlugin::decrypt(
     // return result
     *decrypted = plaintext;
     return Sailfish::Crypto::Result(Sailfish::Crypto::Result::Succeeded);
+}
+
+Sailfish::Crypto::Result
+Daemon::Plugins::OpenSslCryptoPlugin::authenticatedEncrypt(
+        const QByteArray &data,
+        const QByteArray &iv,
+        const Sailfish::Crypto::Key &key,
+        Sailfish::Crypto::CryptoManager::BlockMode blockMode,
+        Sailfish::Crypto::CryptoManager::EncryptionPadding padding,
+        const QByteArray &authenticationData,
+        QByteArray *encrypted,
+        QByteArray *tag)
+{
+    return execEncrypt(true, data, iv, key, blockMode, padding, authenticationData, encrypted, tag);
 }
 
 Sailfish::Crypto::Result
@@ -1060,3 +1104,58 @@ Daemon::Plugins::OpenSslCryptoPlugin::aes_decrypt_ciphertext(
     return decryptedData;
 }
 
+QByteArray
+Daemon::Plugins::OpenSslCryptoPlugin::aes_auth_encrypt_plaintext(
+        Sailfish::Crypto::CryptoManager::BlockMode blockMode,
+        const QByteArray &plaintext,
+        const QByteArray &key,
+        const QByteArray &init_vector,
+        const QByteArray &auth,
+        QByteArray *tagData)
+{
+    if (blockMode != Sailfish::Crypto::CryptoManager::BlockModeGcm) {
+        qWarning() << "Only GCM authentication is supported";
+        return QByteArray();
+    }
+
+    if (auth.isEmpty() || !tagData) {
+        qWarning() << "Authenticated encrypt failed: auth or tag not set!";
+        return QByteArray();
+    }
+
+    if (blockMode == Sailfish::Crypto::CryptoManager::BlockModeGcm
+            && init_vector.size() != SAILFISH_CRYPTO_GCM_IV_SIZE) {
+        qWarning() << "Authenticated encrypt failed: IV size is" << init_vector.size()
+                   << "but should be" << SAILFISH_CRYPTO_GCM_IV_SIZE;
+        return QByteArray();
+    }
+
+    QByteArray encryptedData;
+    unsigned char *encrypted = NULL;
+    unsigned char *tag = NULL;
+    int encryptedSize = -1;
+    const int tagSize = SAILFISH_CRYPTO_GCM_TAG_SIZE;
+
+    encryptedSize = osslevp_aes_auth_encrypt_plaintext(getEvpCipher(blockMode, key.size()),
+                                                       (const unsigned char *)init_vector.constData(),
+                                                       (const unsigned char *)key.constData(),
+                                                       key.size(),
+                                                       (const unsigned char *)auth.constData(),
+                                                       auth.size(),
+                                                       (const unsigned char *)plaintext.constData(),
+                                                       plaintext.size(),
+                                                       &encrypted,
+                                                       &tag,
+                                                       tagSize);
+
+    if (encryptedSize <= 0) {
+        return QByteArray();
+    }
+
+    encryptedData = QByteArray((const char *)encrypted, encryptedSize);
+    free(encrypted);
+    *tagData = QByteArray((const char *)tag, tagSize);
+    free(tag);
+
+    return encryptedData;
+}

@@ -34,6 +34,7 @@
 #define CIPHER_SESSION_INACTIVITY_TIMEOUT 60000 /* 1 minute, change to 10 sec for timeout test */
 #define MAX_CIPHER_SESSIONS_PER_CLIENT 5
 #define SAILFISH_CRYPTO_GCM_TAG_SIZE 16
+#define SAILFISH_CRYPTO_GCM_IV_SIZE 12
 
 class CipherSessionData
 {
@@ -125,7 +126,11 @@ bool validInitializationVector(const QByteArray &initVector,
     // Ensure the IV has the correct size. The IV size for most modes is the same as the block size.
     switch (algorithm) {
     case Sailfish::Crypto::CryptoManager::AlgorithmAes:
-        return initVector.size() == 16;  // AES = 128-bit block size
+        if (blockMode == Sailfish::Crypto::CryptoManager::BlockModeGcm) {
+            return initVector.size() == SAILFISH_CRYPTO_GCM_IV_SIZE;
+        } else {
+            return initVector.size() == 16;  // AES = 128-bit block size
+        }
     default:
         break;
     }
