@@ -480,6 +480,8 @@ Daemon::ApiImpl::CryptoRequestQueue::CryptoRequestQueue(
           QLatin1String("org.sailfishos.crypto"),
           parent,
           autotestMode)
+    , m_requestProcessor(Q_NULLPTR)
+    , m_controller(parent)
 {
     CryptoDaemonConnection::registerDBusTypes();
 
@@ -498,6 +500,12 @@ Daemon::ApiImpl::CryptoRequestQueue::CryptoRequestQueue(
 
 Daemon::ApiImpl::CryptoRequestQueue::~CryptoRequestQueue()
 {
+}
+
+Sailfish::Secrets::Daemon::Controller*
+Daemon::ApiImpl::CryptoRequestQueue::controller()
+{
+    return m_controller;
 }
 
 QWeakPointer<QThreadPool> Daemon::ApiImpl::CryptoRequestQueue::cryptoThreadPool()
@@ -1395,6 +1403,86 @@ void Daemon::ApiImpl::CryptoRequestQueue::handleFinishedRequest(
                         : QByteArray();
                 request->connection.send(request->message.createReply() << QVariant::fromValue<Result>(result)
                                                                         << QVariant::fromValue<QByteArray>(decrypted));
+                *completed = true;
+            }
+            break;
+        }
+        case InitialiseCipherSessionRequest: {
+            Result result = request->outParams.size()
+                    ? request->outParams.takeFirst().value<Result>()
+                    : Result(Result::UnknownError,
+                             QLatin1String("Unable to determine result of InitialiseCipherSessionRequest request"));
+            if (result.code() == Result::Pending) {
+                // shouldn't happen!
+                qCWarning(lcSailfishCryptoDaemon) << "InitialiseCipherSessionRequest:" << request->requestId << "finished as pending!";
+                *completed = true;
+            } else {
+                quint32 cipherSessionToken = request->outParams.size()
+                        ? request->outParams.takeFirst().value<quint32>()
+                        : 0;
+                QByteArray generatedIV = request->outParams.size()
+                        ? request->outParams.takeFirst().toByteArray()
+                        : QByteArray();
+                request->connection.send(request->message.createReply() << QVariant::fromValue<Result>(result)
+                                                                        << QVariant::fromValue<quint32>(cipherSessionToken)
+                                                                        << QVariant::fromValue<QByteArray>(generatedIV));
+                *completed = true;
+            }
+            break;
+        }
+        case UpdateCipherSessionAuthenticationRequest: {
+            Result result = request->outParams.size()
+                    ? request->outParams.takeFirst().value<Result>()
+                    : Result(Result::UnknownError,
+                             QLatin1String("Unable to determine result of UpdateCipherSessionAuthenticationRequest request"));
+            if (result.code() == Result::Pending) {
+                // shouldn't happen!
+                qCWarning(lcSailfishCryptoDaemon) << "UpdateCipherSessionAuthenticationRequest:" << request->requestId << "finished as pending!";
+                *completed = true;
+            } else {
+                request->connection.send(request->message.createReply() << QVariant::fromValue<Result>(result));
+                *completed = true;
+            }
+            break;
+        }
+        case UpdateCipherSessionRequest: {
+            Result result = request->outParams.size()
+                    ? request->outParams.takeFirst().value<Result>()
+                    : Result(Result::UnknownError,
+                             QLatin1String("Unable to determine result of UpdateCipherSessionRequest request"));
+            if (result.code() == Result::Pending) {
+                // shouldn't happen!
+                qCWarning(lcSailfishCryptoDaemon) << "UpdateCipherSessionRequest:" << request->requestId << "finished as pending!";
+                *completed = true;
+            } else {
+                QByteArray generatedData = request->outParams.size()
+                        ? request->outParams.takeFirst().toByteArray()
+                        : QByteArray();
+                request->connection.send(request->message.createReply() << QVariant::fromValue<Result>(result)
+                                                                        << QVariant::fromValue<QByteArray>(generatedData));
+                *completed = true;
+            }
+            break;
+        }
+        case FinaliseCipherSessionRequest: {
+            Result result = request->outParams.size()
+                    ? request->outParams.takeFirst().value<Result>()
+                    : Result(Result::UnknownError,
+                             QLatin1String("Unable to determine result of FinaliseCipherSessionRequest request"));
+            if (result.code() == Result::Pending) {
+                // shouldn't happen!
+                qCWarning(lcSailfishCryptoDaemon) << "FinaliseCipherSessionRequest:" << request->requestId << "finished as pending!";
+                *completed = true;
+            } else {
+                QByteArray generatedData = request->outParams.size()
+                        ? request->outParams.takeFirst().toByteArray()
+                        : QByteArray();
+                bool verified = request->outParams.size()
+                        ? request->outParams.takeFirst().toBool()
+                        : false;
+                request->connection.send(request->message.createReply() << QVariant::fromValue<Result>(result)
+                                                                        << QVariant::fromValue<QByteArray>(generatedData)
+                                                                        << QVariant::fromValue<bool>(verified));
                 *completed = true;
             }
             break;

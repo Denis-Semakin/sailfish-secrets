@@ -15,10 +15,16 @@
 #include "logging_p.h"
 #include "plugin_p.h"
 
+#include "cryptopluginfunctionwrappers_p.h"
+
 #include <QtCore/QDir>
 #include <QtCore/QPluginLoader>
 #include <QtCore/QObject>
 #include <QtCore/QCoreApplication>
+#include <QtCore/QFuture>
+#include <QtCore/QFutureWatcher>
+
+#include <QtConcurrent>
 
 namespace {
     Sailfish::Crypto::Result transformSecretsResult(const Sailfish::Secrets::Result &result) {
@@ -225,16 +231,34 @@ Daemon::ApiImpl::RequestProcessor::generateRandomData(
         const QString &cryptosystemProviderName,
         QByteArray *randomData)
 {
-    // TODO: access control!
-    Q_UNUSED(requestId);
+    Q_UNUSED(requestId);  // TODO: access control!
+    Q_UNUSED(randomData); // asynchronous out-param.
 
     if (!m_cryptoPlugins.contains(cryptosystemProviderName)) {
         return Result(Result::InvalidCryptographicServiceProvider,
                       QLatin1String("No such cryptographic service provider plugin exists"));
     }
 
-    return m_cryptoPlugins[cryptosystemProviderName]->generateRandomData(
-                static_cast<quint64>(callerPid), csprngEngineName, numberBytes, randomData);
+    QFutureWatcher<DataResult> *watcher = new QFutureWatcher<DataResult>(this);
+    QFuture<DataResult> future = QtConcurrent::run(
+                m_requestQueue->controller()->threadPoolForPlugin(cryptosystemProviderName).data(),
+                CryptoPluginWrapper::generateRandomData,
+                m_cryptoPlugins[cryptosystemProviderName],
+                static_cast<quint64>(callerPid),
+                csprngEngineName,
+                numberBytes);
+
+    watcher->setFuture(future);
+    connect(watcher, &QFutureWatcher<DataResult>::finished, [=] {
+        watcher->deleteLater();
+        DataResult dr = watcher->future().result();
+        QVariantList outParams;
+        outParams << QVariant::fromValue<Result>(dr.result);
+        outParams << QVariant::fromValue<QByteArray>(dr.data);
+        m_requestQueue->requestFinished(requestId, outParams);
+    });
+
+    return Result(Result::Pending);
 }
 
 Result
@@ -254,8 +278,25 @@ Daemon::ApiImpl::RequestProcessor::seedRandomDataGenerator(
                       QLatin1String("No such cryptographic service provider plugin exists"));
     }
 
-    return m_cryptoPlugins[cryptosystemProviderName]->seedRandomDataGenerator(
-                static_cast<quint64>(callerPid), csprngEngineName, seedData, entropyEstimate);
+    QFutureWatcher<Result> *watcher = new QFutureWatcher<Result>(this);
+    QFuture<Result> future = QtConcurrent::run(
+                m_requestQueue->controller()->threadPoolForPlugin(cryptosystemProviderName).data(),
+                CryptoPluginWrapper::seedRandomDataGenerator,
+                m_cryptoPlugins[cryptosystemProviderName],
+                static_cast<quint64>(callerPid),
+                csprngEngineName,
+                seedData,
+                entropyEstimate);
+
+    watcher->setFuture(future);
+    connect(watcher, &QFutureWatcher<Result>::finished, [=] {
+        watcher->deleteLater();
+        QVariantList outParams;
+        outParams << QVariant::fromValue<Result>(watcher->future().result());
+        m_requestQueue->requestFinished(requestId, outParams);
+    });
+
+    return Result(Result::Pending);
 }
 
 Result
@@ -269,13 +310,31 @@ Daemon::ApiImpl::RequestProcessor::validateCertificateChain(
     // TODO: access control!
     Q_UNUSED(callerPid);
     Q_UNUSED(requestId);
+    Q_UNUSED(valid); // asynchronous out-param.
 
     if (!m_cryptoPlugins.contains(cryptosystemProviderName)) {
         return Result(Result::InvalidCryptographicServiceProvider,
                       QLatin1String("No such cryptographic service provider plugin exists"));
     }
 
-    return m_cryptoPlugins[cryptosystemProviderName]->validateCertificateChain(chain, valid);
+    QFutureWatcher<ValidatedResult> *watcher = new QFutureWatcher<ValidatedResult>(this);
+    QFuture<ValidatedResult> future = QtConcurrent::run(
+                m_requestQueue->controller()->threadPoolForPlugin(cryptosystemProviderName).data(),
+                CryptoPluginWrapper::validateCertificateChain,
+                m_cryptoPlugins[cryptosystemProviderName],
+                chain);
+
+    watcher->setFuture(future);
+    connect(watcher, &QFutureWatcher<ValidatedResult>::finished, [=] {
+        watcher->deleteLater();
+        ValidatedResult vr = watcher->future().result();
+        QVariantList outParams;
+        outParams << QVariant::fromValue<Result>(vr.result);
+        outParams << QVariant::fromValue<bool>(vr.validated);
+        m_requestQueue->requestFinished(requestId, outParams);
+    });
+
+    return Result(Result::Pending);
 }
 
 Result
@@ -291,13 +350,33 @@ Daemon::ApiImpl::RequestProcessor::generateKey(
     // TODO: access control!
     Q_UNUSED(callerPid);
     Q_UNUSED(requestId);
+    Q_UNUSED(key); // asynchronous out-param.
 
     if (!m_cryptoPlugins.contains(cryptosystemProviderName)) {
         return Result(Result::InvalidCryptographicServiceProvider,
                       QLatin1String("No such cryptographic service provider plugin exists"));
     }
 
-    return m_cryptoPlugins[cryptosystemProviderName]->generateKey(keyTemplate, kpgParams, skdfParams, key);
+    QFutureWatcher<KeyResult> *watcher = new QFutureWatcher<KeyResult>(this);
+    QFuture<KeyResult> future = QtConcurrent::run(
+                m_requestQueue->controller()->threadPoolForPlugin(cryptosystemProviderName).data(),
+                CryptoPluginWrapper::generateKey,
+                m_cryptoPlugins[cryptosystemProviderName],
+                keyTemplate,
+                kpgParams,
+                skdfParams);
+
+    watcher->setFuture(future);
+    connect(watcher, &QFutureWatcher<KeyResult>::finished, [=] {
+        watcher->deleteLater();
+        KeyResult kr = watcher->future().result();
+        QVariantList outParams;
+        outParams << QVariant::fromValue<Result>(kr.result);
+        outParams << QVariant::fromValue<Key>(kr.key);
+        m_requestQueue->requestFinished(requestId, outParams);
+    });
+
+    return Result(Result::Pending);
 }
 
 Result
@@ -416,33 +495,50 @@ Daemon::ApiImpl::RequestProcessor::generateStoredKey2(
         return Result(Result::Pending);
     } else {
         // generate the key
-        Key fullKey(keyTemplate);
-        Result keyResult = m_cryptoPlugins[cryptosystemProviderName]->generateKey(
-                    keyTemplate, kpgParams, skdfParams, &fullKey);
-        if (keyResult.code() == Result::Failed) {
-            return keyResult;
-        }
+        QFutureWatcher<KeyResult> *watcher = new QFutureWatcher<KeyResult>(this);
+        QFuture<KeyResult> future = QtConcurrent::run(
+                    m_requestQueue->controller()->threadPoolForPlugin(cryptosystemProviderName).data(),
+                    CryptoPluginWrapper::generateKey,
+                    m_cryptoPlugins[cryptosystemProviderName],
+                    keyTemplate,
+                    kpgParams,
+                    skdfParams);
 
-        retn = transformSecretsResult(m_secrets->storeKey(
-                                            callerPid,
-                                            requestId,
-                                            fullKey.identifier(),
-                                            Key::serialise(fullKey, Key::LossySerialisationMode),
-                                            fullKey.filterData(),
-                                            storageProviderName));
-        if (retn.code() == Result::Failed) {
-            return retn;
-        }
+        watcher->setFuture(future);
+        connect(watcher, &QFutureWatcher<KeyResult>::finished, [=] {
+            watcher->deleteLater();
+            KeyResult kr = watcher->future().result();
+            if (kr.result.code() == Result::Failed) {
+                QVariantList outParams;
+                outParams << QVariant::fromValue<Result>(kr.result);
+                m_requestQueue->requestFinished(requestId, outParams);
+            } else {
+                Result storeKeyResult = transformSecretsResult(
+                            m_secrets->storeKey(
+                                callerPid,
+                                requestId,
+                                kr.key.identifier(),
+                                Key::serialise(kr.key, Key::LossySerialisationMode),
+                                kr.key.filterData(),
+                                storageProviderName));
+                if (storeKeyResult.code() == Result::Failed) {
+                    QVariantList outParams;
+                    outParams << QVariant::fromValue<Result>(storeKeyResult);
+                    m_requestQueue->requestFinished(requestId, outParams);
+                } else {
+                    // asynchronous operation, will call back to generateStoredKey_inStoragePlugin().
+                    m_pendingRequests.insert(requestId,
+                                             Daemon::ApiImpl::RequestProcessor::PendingRequest(
+                                                 callerPid,
+                                                 requestId,
+                                                 Daemon::ApiImpl::GenerateStoredKeyRequest,
+                                                 QVariantList() << QVariant::fromValue<Key>(kr.key)
+                                                                << QVariant::fromValue<QString>(cryptosystemProviderName)
+                                                                << QVariant::fromValue<QString>(storageProviderName)));
+                }
+            }
+        });
 
-        // asynchronous operation, will call back to generateStoredKey_inStoragePlugin().
-        m_pendingRequests.insert(requestId,
-                                 Daemon::ApiImpl::RequestProcessor::PendingRequest(
-                                     callerPid,
-                                     requestId,
-                                     Daemon::ApiImpl::GenerateStoredKeyRequest,
-                                     QVariantList() << QVariant::fromValue<Key>(fullKey)
-                                                    << QVariant::fromValue<QString>(cryptosystemProviderName)
-                                                    << QVariant::fromValue<QString>(storageProviderName)));
         return Result(Result::Pending);
     }
 }
@@ -579,40 +675,61 @@ Daemon::ApiImpl::RequestProcessor::generateStoredKey_inCryptoPlugin(
         qCWarning(lcSailfishCryptoDaemon) << "Failed to clean up stored key metadata after failed generateStoredKey request:"
                                           << cleanupResult.storageErrorCode() << cleanupResult.errorMessage();
         m_secrets->removeKeyEntry(callerPid, requestId, keyTemplate.identifier());
-    } else {
-        retn = m_cryptoPlugins[cryptosystemProviderName]->generateAndStoreKey(
-                    keyTemplate, kpgParams, skdfParams, &fullKey);
-        if (retn.code() == Result::Failed) {
-            // Attempt to remove the key metadata from secrets storage, to cleanup.
-            // Note: the keyEntry should be cascade deleted automatically.
-            Result cleanupResult = transformSecretsResult(m_secrets->deleteStoredKeyMetadata(callerPid, requestId, keyTemplate.identifier()));
-            if (cleanupResult.code() != Result::Failed) {
-                m_pendingRequests.insert(requestId,
-                                         Daemon::ApiImpl::RequestProcessor::PendingRequest(
-                                             callerPid,
-                                             requestId,
-                                             Daemon::ApiImpl::GenerateStoredKeyRequest,
-                                             QVariantList() << QVariant::fromValue<Key>(keyTemplate)
-                                                            << QVariant::fromValue<Result>(retn)));
-                return;
-            }
-            // TODO: we now have stale data in the secrets main table.
-            //       Add a dirty flag for this datum, and attempt to cleanup later.
-            // Also clean up the key entry as it doesn't actually exist.
-            qCWarning(lcSailfishCryptoDaemon) << "Failed to clean up stored key metadata after failed generateStoredKey request:"
-                                              << cleanupResult.storageErrorCode() << cleanupResult.errorMessage();
-            m_secrets->removeKeyEntry(callerPid, requestId, keyTemplate.identifier());
-        }
-    }
 
-    // finish the asynchronous request.
-    Key partialKey(fullKey);
-    partialKey.setPrivateKey(QByteArray());
-    partialKey.setSecretKey(QByteArray());
-    QList<QVariant> outParams;
-    outParams << QVariant::fromValue<Result>(retn);
-    outParams << QVariant::fromValue<Key>(partialKey);
-    m_requestQueue->requestFinished(requestId, outParams);
+        // finish the asynchronous request.
+        Key partialKey(fullKey);
+        partialKey.setPrivateKey(QByteArray());
+        partialKey.setSecretKey(QByteArray());
+        QList<QVariant> outParams;
+        outParams << QVariant::fromValue<Result>(retn);
+        outParams << QVariant::fromValue<Key>(partialKey);
+        m_requestQueue->requestFinished(requestId, outParams);
+    } else {
+        QFutureWatcher<KeyResult> *watcher = new QFutureWatcher<KeyResult>(this);
+        QFuture<KeyResult> future = QtConcurrent::run(
+                    m_requestQueue->controller()->threadPoolForPlugin(cryptosystemProviderName).data(),
+                    CryptoPluginWrapper::generateAndStoreKey,
+                    m_cryptoPlugins[cryptosystemProviderName],
+                    keyTemplate,
+                    kpgParams,
+                    skdfParams);
+
+        watcher->setFuture(future);
+        connect(watcher, &QFutureWatcher<KeyResult>::finished, [=] {
+            watcher->deleteLater();
+            KeyResult kr = watcher->future().result();
+            if (kr.result.code() == Result::Failed) {
+                // Attempt to remove the key metadata from secrets storage, to cleanup.
+                // Note: the keyEntry should be cascade deleted automatically.
+                Result cleanupResult = transformSecretsResult(m_secrets->deleteStoredKeyMetadata(callerPid, requestId, keyTemplate.identifier()));
+                if (cleanupResult.code() != Result::Failed) {
+                    m_pendingRequests.insert(requestId,
+                                             Daemon::ApiImpl::RequestProcessor::PendingRequest(
+                                                 callerPid,
+                                                 requestId,
+                                                 Daemon::ApiImpl::GenerateStoredKeyRequest,
+                                                 QVariantList() << QVariant::fromValue<Key>(keyTemplate)
+                                                                << QVariant::fromValue<Result>(kr.result)));
+                    return;
+                } else {
+                    // TODO: we now have stale data in the secrets main table.
+                    //       Add a dirty flag for this datum, and attempt to cleanup later.
+                    // Also clean up the key entry as it doesn't actually exist.
+                    qCWarning(lcSailfishCryptoDaemon) << "Failed to clean up stored key metadata after failed generateStoredKey request:"
+                                                      << cleanupResult.storageErrorCode() << cleanupResult.errorMessage();
+                    m_secrets->removeKeyEntry(callerPid, requestId, keyTemplate.identifier());
+                }
+            }
+            // finish the asynchronous request.
+            Key partialKey(fullKey);
+            partialKey.setPrivateKey(QByteArray());
+            partialKey.setSecretKey(QByteArray());
+            QList<QVariant> outParams;
+            outParams << QVariant::fromValue<Result>(kr.result);
+            outParams << QVariant::fromValue<Key>(partialKey);
+            m_requestQueue->requestFinished(requestId, outParams);
+        });
+    }
 }
 
 void
@@ -677,7 +794,25 @@ Daemon::ApiImpl::RequestProcessor::storedKey(
     }
 
     if (m_cryptoPlugins.contains(storagePluginName)) {
-        return m_cryptoPlugins[storagePluginName]->storedKey(identifier, keyComponents, key);
+        QFutureWatcher<KeyResult> *watcher = new QFutureWatcher<KeyResult>(this);
+        QFuture<KeyResult> future = QtConcurrent::run(
+                    m_requestQueue->controller()->threadPoolForPlugin(storagePluginName).data(),
+                    CryptoPluginWrapper::storedKey,
+                    m_cryptoPlugins[storagePluginName],
+                    identifier,
+                    keyComponents);
+
+        watcher->setFuture(future);
+        connect(watcher, &QFutureWatcher<KeyResult>::finished, [=] {
+            watcher->deleteLater();
+            KeyResult kr = watcher->future().result();
+            QVariantList outParams;
+            outParams << QVariant::fromValue<Result>(kr.result);
+            outParams << QVariant::fromValue<Key>(kr.key);
+            m_requestQueue->requestFinished(requestId, outParams);
+        });
+
+        return Result(Result::Pending);
     }
 
     QByteArray serialisedKey;
@@ -795,6 +930,7 @@ Daemon::ApiImpl::RequestProcessor::calculateDigest(
     // TODO: Access Control
     Q_UNUSED(callerPid)
     Q_UNUSED(requestId)
+    Q_UNUSED(digest); // asynchronous out-param.
 
     CryptoPlugin* cryptoPlugin = m_cryptoPlugins.value(cryptosystemProviderName);
     if (cryptoPlugin == Q_NULLPTR) {
@@ -802,7 +938,25 @@ Daemon::ApiImpl::RequestProcessor::calculateDigest(
                       QLatin1String("No such cryptographic service provider plugin exists"));
     }
 
-    return cryptoPlugin->calculateDigest(data, padding, digestFunction, digest);
+    QFutureWatcher<DataResult> *watcher = new QFutureWatcher<DataResult>(this);
+    QFuture<DataResult> future = QtConcurrent::run(
+                m_requestQueue->controller()->threadPoolForPlugin(cryptosystemProviderName).data(),
+                CryptoPluginWrapper::calculateDigest,
+                cryptoPlugin,
+                data,
+                std::make_tuple(padding, digestFunction));
+
+    watcher->setFuture(future);
+    connect(watcher, &QFutureWatcher<DataResult>::finished, [=] {
+        watcher->deleteLater();
+        DataResult dr = watcher->future().result();
+        QVariantList outParams;
+        outParams << QVariant::fromValue<Result>(dr.result);
+        outParams << QVariant::fromValue<QByteArray>(dr.data);
+        m_requestQueue->requestFinished(requestId, outParams);
+    });
+
+    return Result(Result::Pending);
 }
 
 Result
@@ -817,6 +971,7 @@ Daemon::ApiImpl::RequestProcessor::sign(
         QByteArray *signature)
 {
     // TODO: Access Control
+    Q_UNUSED(signature); // asynchronous out-param.
 
     CryptoPlugin* cryptoPlugin = m_cryptoPlugins.value(cryptosystemProviderName);
     if (cryptoPlugin == Q_NULLPTR) {
@@ -889,7 +1044,26 @@ Daemon::ApiImpl::RequestProcessor::sign(
         fullKey = key;
     }
 
-    return cryptoPlugin->sign(data, fullKey, padding, digestFunction, signature);
+    QFutureWatcher<DataResult> *watcher = new QFutureWatcher<DataResult>(this);
+    QFuture<DataResult> future = QtConcurrent::run(
+                m_requestQueue->controller()->threadPoolForPlugin(cryptosystemProviderName).data(),
+                CryptoPluginWrapper::sign,
+                cryptoPlugin,
+                data,
+                fullKey,
+                std::make_tuple(padding, digestFunction));
+
+    watcher->setFuture(future);
+    connect(watcher, &QFutureWatcher<DataResult>::finished, [=] {
+        watcher->deleteLater();
+        DataResult dr = watcher->future().result();
+        QVariantList outParams;
+        outParams << QVariant::fromValue<Result>(dr.result);
+        outParams << QVariant::fromValue<QByteArray>(dr.data);
+        m_requestQueue->requestFinished(requestId, outParams);
+    });
+
+    return Result(Result::Pending);
 }
 
 void
@@ -902,18 +1076,33 @@ Daemon::ApiImpl::RequestProcessor::sign2(
         CryptoManager::DigestFunction digestFunction,
         const QString &cryptoPluginName)
 {
-    // finish the request.
-    QList<QVariant> outParams;
-    QByteArray signature;
-    if (result.code() == Result::Succeeded) {
-        Key fullKey = Key::deserialise(serialisedKey);
-        Result cryptoResult = m_cryptoPlugins[cryptoPluginName]->sign(data, fullKey, padding, digestFunction, &signature);
-        outParams << QVariant::fromValue<Result>(cryptoResult);
-    } else {
+    if (result.code() != Result::Succeeded) {
+        QList<QVariant> outParams;
+        QByteArray signature;
         outParams << QVariant::fromValue<Result>(result);
+        outParams << QVariant::fromValue<QByteArray>(signature);
+        m_requestQueue->requestFinished(requestId, outParams);
+        return;
     }
-    outParams << QVariant::fromValue<QByteArray>(signature);
-    m_requestQueue->requestFinished(requestId, outParams);
+
+    QFutureWatcher<DataResult> *watcher = new QFutureWatcher<DataResult>(this);
+    QFuture<DataResult> future = QtConcurrent::run(
+                m_requestQueue->controller()->threadPoolForPlugin(cryptoPluginName).data(),
+                CryptoPluginWrapper::sign,
+                m_cryptoPlugins[cryptoPluginName],
+                data,
+                Key::deserialise(serialisedKey),
+                std::make_tuple(padding, digestFunction));
+
+    watcher->setFuture(future);
+    connect(watcher, &QFutureWatcher<DataResult>::finished, [=] {
+        watcher->deleteLater();
+        DataResult dr = watcher->future().result();
+        QVariantList outParams;
+        outParams << QVariant::fromValue<Result>(dr.result);
+        outParams << QVariant::fromValue<QByteArray>(dr.data);
+        m_requestQueue->requestFinished(requestId, outParams);
+    });
 }
 
 Result
@@ -929,6 +1118,7 @@ Daemon::ApiImpl::RequestProcessor::verify(
         bool *verified)
 {
     // TODO: Access Control
+    Q_UNUSED(verified); // asynchronous out-param.
 
     CryptoPlugin* cryptoPlugin = m_cryptoPlugins.value(cryptosystemProviderName);
     if (cryptoPlugin == Q_NULLPTR) {
@@ -1002,7 +1192,27 @@ Daemon::ApiImpl::RequestProcessor::verify(
         fullKey = key;
     }
 
-    return cryptoPlugin->verify(signature, data, fullKey, padding, digestFunction, verified);
+    QFutureWatcher<ValidatedResult> *watcher = new QFutureWatcher<ValidatedResult>(this);
+    QFuture<ValidatedResult> future = QtConcurrent::run(
+                m_requestQueue->controller()->threadPoolForPlugin(cryptosystemProviderName).data(),
+                CryptoPluginWrapper::verify,
+                cryptoPlugin,
+                signature,
+                data,
+                fullKey,
+                std::make_tuple(padding, digestFunction));
+
+    watcher->setFuture(future);
+    connect(watcher, &QFutureWatcher<ValidatedResult>::finished, [=] {
+        watcher->deleteLater();
+        ValidatedResult vr = watcher->future().result();
+        QVariantList outParams;
+        outParams << QVariant::fromValue<Result>(vr.result);
+        outParams << QVariant::fromValue<bool>(vr.validated);
+        m_requestQueue->requestFinished(requestId, outParams);
+    });
+
+    return Result(Result::Pending);
 }
 
 void
@@ -1016,18 +1226,33 @@ Daemon::ApiImpl::RequestProcessor::verify2(
         CryptoManager::DigestFunction digestFunction,
         const QString &cryptoPluginName)
 {
-    // finish the request.
-    QList<QVariant> outParams;
-    bool verified = false;
-    if (result.code() == Result::Succeeded) {
-        Key fullKey = Key::deserialise(serialisedKey);
-        Result cryptoResult = m_cryptoPlugins[cryptoPluginName]->verify(signature, data, fullKey, padding, digestFunction, &verified);
-        outParams << QVariant::fromValue<Result>(cryptoResult);
-    } else {
+    if (result.code() != Result::Succeeded) {
+        QList<QVariant> outParams;
         outParams << QVariant::fromValue<Result>(result);
+        outParams << QVariant::fromValue<bool>(false);
+        m_requestQueue->requestFinished(requestId, outParams);
+        return;
     }
-    outParams << QVariant::fromValue<bool>(verified);
-    m_requestQueue->requestFinished(requestId, outParams);
+
+    QFutureWatcher<ValidatedResult> *watcher = new QFutureWatcher<ValidatedResult>(this);
+    QFuture<ValidatedResult> future = QtConcurrent::run(
+                m_requestQueue->controller()->threadPoolForPlugin(cryptoPluginName).data(),
+                CryptoPluginWrapper::verify,
+                m_cryptoPlugins[cryptoPluginName],
+                signature,
+                data,
+                Key::deserialise(serialisedKey),
+                std::make_tuple(padding, digestFunction));
+
+    watcher->setFuture(future);
+    connect(watcher, &QFutureWatcher<ValidatedResult>::finished, [=] {
+        watcher->deleteLater();
+        ValidatedResult vr = watcher->future().result();
+        QVariantList outParams;
+        outParams << QVariant::fromValue<Result>(vr.result);
+        outParams << QVariant::fromValue<bool>(vr.validated);
+        m_requestQueue->requestFinished(requestId, outParams);
+    });
 }
 
 Result
@@ -1043,6 +1268,7 @@ Daemon::ApiImpl::RequestProcessor::encrypt(
         QByteArray *encrypted)
 {
     // TODO: Access Control
+    Q_UNUSED(encrypted); // asynchronous out-param.
 
     CryptoPlugin* cryptoPlugin = m_cryptoPlugins.value(cryptosystemProviderName);
     if (cryptoPlugin == Q_NULLPTR) {
@@ -1116,7 +1342,27 @@ Daemon::ApiImpl::RequestProcessor::encrypt(
         fullKey = key;
     }
 
-    return cryptoPlugin->encrypt(data, iv, fullKey, blockMode, padding, encrypted);
+    QFutureWatcher<DataResult> *watcher = new QFutureWatcher<DataResult>(this);
+    QFuture<DataResult> future = QtConcurrent::run(
+                m_requestQueue->controller()->threadPoolForPlugin(cryptosystemProviderName).data(),
+                CryptoPluginWrapper::encrypt,
+                cryptoPlugin,
+                data,
+                iv,
+                fullKey,
+                std::make_tuple(blockMode, padding));
+
+    watcher->setFuture(future);
+    connect(watcher, &QFutureWatcher<DataResult>::finished, [=] {
+        watcher->deleteLater();
+        DataResult dr = watcher->future().result();
+        QVariantList outParams;
+        outParams << QVariant::fromValue<Result>(dr.result);
+        outParams << QVariant::fromValue<QByteArray>(dr.data);
+        m_requestQueue->requestFinished(requestId, outParams);
+    });
+
+    return Result(Result::Pending);
 }
 
 void
@@ -1130,24 +1376,44 @@ Daemon::ApiImpl::RequestProcessor::encrypt2(
         CryptoManager::EncryptionPadding padding,
         const QString &cryptoPluginName)
 {
-    // finish the request.
-    QList<QVariant> outParams;
-    QByteArray encrypted;
-    if (result.code() == Result::Succeeded) {
-        bool ok = false;
-        Key fullKey = Key::deserialise(serialisedKey, &ok);
-        if (!ok) {
-            outParams << QVariant::fromValue<Result>(Result(Result::SerialisationError,
-                                                            QLatin1String("Failed to deserialise key!")));
-        } else {
-            Result cryptoResult = m_cryptoPlugins[cryptoPluginName]->encrypt(data, iv, fullKey, blockMode, padding, &encrypted);
-            outParams << QVariant::fromValue<Result>(cryptoResult);
-        }
-    } else {
+    if (result.code() != Result::Succeeded) {
+        QList<QVariant> outParams;
         outParams << QVariant::fromValue<Result>(result);
+        outParams << QVariant::fromValue<QByteArray>(QByteArray());
+        m_requestQueue->requestFinished(requestId, outParams);
+        return;
     }
-    outParams << QVariant::fromValue<QByteArray>(encrypted);
-    m_requestQueue->requestFinished(requestId, outParams);
+
+    bool ok = false;
+    Key fullKey = Key::deserialise(serialisedKey, &ok);
+    if (!ok) {
+        QList<QVariant> outParams;
+        outParams << QVariant::fromValue<Result>(Result(Result::SerialisationError,
+                                                        QLatin1String("Failed to deserialise key!")));
+        outParams << QVariant::fromValue<QByteArray>(QByteArray());
+        m_requestQueue->requestFinished(requestId, outParams);
+        return;
+    }
+
+    QFutureWatcher<DataResult> *watcher = new QFutureWatcher<DataResult>(this);
+    QFuture<DataResult> future = QtConcurrent::run(
+                m_requestQueue->controller()->threadPoolForPlugin(cryptoPluginName).data(),
+                CryptoPluginWrapper::encrypt,
+                m_cryptoPlugins[cryptoPluginName],
+                data,
+                iv,
+                fullKey,
+                std::make_tuple(blockMode, padding));
+
+    watcher->setFuture(future);
+    connect(watcher, &QFutureWatcher<DataResult>::finished, [=] {
+        watcher->deleteLater();
+        DataResult dr = watcher->future().result();
+        QVariantList outParams;
+        outParams << QVariant::fromValue<Result>(dr.result);
+        outParams << QVariant::fromValue<QByteArray>(dr.data);
+        m_requestQueue->requestFinished(requestId, outParams);
+    });
 }
 
 Result
@@ -1163,6 +1429,7 @@ Daemon::ApiImpl::RequestProcessor::decrypt(
         QByteArray *decrypted)
 {
     // TODO: Access Control
+    Q_UNUSED(decrypted); // asynchronous out-param.
 
     CryptoPlugin* cryptoPlugin = m_cryptoPlugins.value(cryptosystemProviderName);
     if (cryptoPlugin == Q_NULLPTR) {
@@ -1237,7 +1504,27 @@ Daemon::ApiImpl::RequestProcessor::decrypt(
         fullKey = key;
     }
 
-    return cryptoPlugin->decrypt(data, iv, fullKey, blockMode, padding, decrypted);
+    QFutureWatcher<DataResult> *watcher = new QFutureWatcher<DataResult>(this);
+    QFuture<DataResult> future = QtConcurrent::run(
+                m_requestQueue->controller()->threadPoolForPlugin(cryptosystemProviderName).data(),
+                CryptoPluginWrapper::decrypt,
+                cryptoPlugin,
+                data,
+                iv,
+                fullKey,
+                std::make_tuple(blockMode, padding));
+
+    watcher->setFuture(future);
+    connect(watcher, &QFutureWatcher<DataResult>::finished, [=] {
+        watcher->deleteLater();
+        DataResult dr = watcher->future().result();
+        QVariantList outParams;
+        outParams << QVariant::fromValue<Result>(dr.result);
+        outParams << QVariant::fromValue<QByteArray>(dr.data);
+        m_requestQueue->requestFinished(requestId, outParams);
+    });
+
+    return Result(Result::Pending);
 }
 
 void
@@ -1251,18 +1538,32 @@ Daemon::ApiImpl::RequestProcessor::decrypt2(
         CryptoManager::EncryptionPadding padding,
         const QString &cryptoPluginName)
 {
-    // finish the request.
-    QList<QVariant> outParams;
-    QByteArray decrypted;
-    if (result.code() == Result::Succeeded) {
-        Key fullKey = Key::deserialise(serialisedKey);
-        Result cryptoResult = m_cryptoPlugins[cryptoPluginName]->decrypt(data, iv, fullKey, blockMode, padding, &decrypted);
-        outParams << QVariant::fromValue<Result>(cryptoResult);
-    } else {
+    if (result.code() != Result::Succeeded) {
+        QList<QVariant> outParams;
         outParams << QVariant::fromValue<Result>(result);
+        outParams << QVariant::fromValue<QByteArray>(QByteArray());
+        m_requestQueue->requestFinished(requestId, outParams);
     }
-    outParams << QVariant::fromValue<QByteArray>(decrypted);
-    m_requestQueue->requestFinished(requestId, outParams);
+
+    QFutureWatcher<DataResult> *watcher = new QFutureWatcher<DataResult>(this);
+    QFuture<DataResult> future = QtConcurrent::run(
+                m_requestQueue->controller()->threadPoolForPlugin(cryptoPluginName).data(),
+                CryptoPluginWrapper::decrypt,
+                m_cryptoPlugins[cryptoPluginName],
+                data,
+                iv,
+                Key::deserialise(serialisedKey),
+                std::make_tuple(blockMode, padding));
+
+    watcher->setFuture(future);
+    connect(watcher, &QFutureWatcher<DataResult>::finished, [=] {
+        watcher->deleteLater();
+        DataResult dr = watcher->future().result();
+        QVariantList outParams;
+        outParams << QVariant::fromValue<Result>(dr.result);
+        outParams << QVariant::fromValue<QByteArray>(dr.data);
+        m_requestQueue->requestFinished(requestId, outParams);
+    });
 }
 
 
@@ -1282,6 +1583,8 @@ Daemon::ApiImpl::RequestProcessor::initialiseCipherSession(
         QByteArray *generatedIV)
 {
     // TODO: Access Control
+    Q_UNUSED(cipherSessionToken); // asynchronous out-param.
+    Q_UNUSED(generatedIV); // asynchronous out-param.
 
     CryptoPlugin* cryptoPlugin = m_cryptoPlugins.value(cryptosystemProviderName);
     if (cryptoPlugin == Q_NULLPTR) {
@@ -1347,12 +1650,33 @@ Daemon::ApiImpl::RequestProcessor::initialiseCipherSession(
         fullKey = key;
     }
 
-    return cryptoPlugin->initialiseCipherSession(
+    QFutureWatcher<CipherSessionTokenResult> *watcher = new QFutureWatcher<CipherSessionTokenResult>(this);
+    QFuture<CipherSessionTokenResult> future = QtConcurrent::run(
+                m_requestQueue->controller()->threadPoolForPlugin(cryptosystemProviderName).data(),
+                CryptoPluginWrapper::initialiseCipherSession,
+                cryptoPlugin,
                 callerPid,
-                iv, fullKey, operation,
-                blockMode, encryptionPadding,
-                signaturePadding, digestFunction,
-                cipherSessionToken, generatedIV);
+                iv,
+                fullKey,
+                std::make_tuple(
+                    operation,
+                    blockMode,
+                    encryptionPadding,
+                    signaturePadding,
+                    digestFunction));
+
+    watcher->setFuture(future);
+    connect(watcher, &QFutureWatcher<CipherSessionTokenResult>::finished, [=] {
+        watcher->deleteLater();
+        CipherSessionTokenResult dr = watcher->future().result();
+        QVariantList outParams;
+        outParams << QVariant::fromValue<Result>(dr.result);
+        outParams << QVariant::fromValue<quint32>(dr.cipherSessionToken);
+        outParams << QVariant::fromValue<QByteArray>(dr.generatedIV);
+        m_requestQueue->requestFinished(requestId, outParams);
+    });
+
+    return Result(Result::Pending);
 }
 
 void
@@ -1369,24 +1693,40 @@ Daemon::ApiImpl::RequestProcessor::initialiseCipherSession2(
         CryptoManager::DigestFunction digestFunction,
         const QString &cryptoPluginName)
 {
-    // finish the request.
-    QList<QVariant> outParams;
-    quint32 cipherSessionToken = 0;
-    QByteArray generatedIV;
-    if (result.code() == Result::Succeeded) {
-        Key fullKey = Key::deserialise(serialisedKey);
-        Result cryptoResult = m_cryptoPlugins[cryptoPluginName]->initialiseCipherSession(
-                    callerPid,
-                    iv, fullKey, operation, blockMode,
-                    encryptionPadding, signaturePadding,
-                    digestFunction, &cipherSessionToken, &generatedIV);
-        outParams << QVariant::fromValue<Result>(cryptoResult);
-    } else {
+    if (result.code() != Result::Succeeded) {
+        QList<QVariant> outParams;
         outParams << QVariant::fromValue<Result>(result);
+        outParams << QVariant::fromValue<quint32>(0);
+        outParams << QVariant::fromValue<QByteArray>(QByteArray());
+        m_requestQueue->requestFinished(requestId, outParams);
+        return;
     }
-    outParams << QVariant::fromValue<quint32>(cipherSessionToken);
-    outParams << QVariant::fromValue<QByteArray>(generatedIV);
-    m_requestQueue->requestFinished(requestId, outParams);
+
+    QFutureWatcher<CipherSessionTokenResult> *watcher = new QFutureWatcher<CipherSessionTokenResult>(this);
+    QFuture<CipherSessionTokenResult> future = QtConcurrent::run(
+                m_requestQueue->controller()->threadPoolForPlugin(cryptoPluginName).data(),
+                CryptoPluginWrapper::initialiseCipherSession,
+                m_cryptoPlugins[cryptoPluginName],
+                callerPid,
+                iv,
+                Key::deserialise(serialisedKey),
+                std::make_tuple(
+                    operation,
+                    blockMode,
+                    encryptionPadding,
+                    signaturePadding,
+                    digestFunction));
+
+    watcher->setFuture(future);
+    connect(watcher, &QFutureWatcher<CipherSessionTokenResult>::finished, [=] {
+        watcher->deleteLater();
+        CipherSessionTokenResult dr = watcher->future().result();
+        QVariantList outParams;
+        outParams << QVariant::fromValue<Result>(dr.result);
+        outParams << QVariant::fromValue<quint32>(dr.cipherSessionToken);
+        outParams << QVariant::fromValue<QByteArray>(dr.generatedIV);
+        m_requestQueue->requestFinished(requestId, outParams);
+    });
 }
 
 Result
@@ -1405,10 +1745,24 @@ Daemon::ApiImpl::RequestProcessor::updateCipherSessionAuthentication(
                       QLatin1String("No such cryptographic service provider plugin exists"));
     }
 
-    return cryptoPlugin->updateCipherSessionAuthentication(
+    QFutureWatcher<Result> *watcher = new QFutureWatcher<Result>(this);
+    QFuture<Result> future = QtConcurrent::run(
+                m_requestQueue->controller()->threadPoolForPlugin(cryptosystemProviderName).data(),
+                CryptoPluginWrapper::updateCipherSessionAuthentication,
+                cryptoPlugin,
                 callerPid,
                 authenticationData,
                 cipherSessionToken);
+
+    watcher->setFuture(future);
+    connect(watcher, &QFutureWatcher<Result>::finished, [=] {
+        watcher->deleteLater();
+        QVariantList outParams;
+        outParams << QVariant::fromValue<Result>(watcher->future().result());
+        m_requestQueue->requestFinished(requestId, outParams);
+    });
+
+    return Result(Result::Pending);
 }
 
 Result
@@ -1421,6 +1775,7 @@ Daemon::ApiImpl::RequestProcessor::updateCipherSession(
         QByteArray *generatedData)
 {
     Q_UNUSED(requestId); // TODO: Access Control
+    Q_UNUSED(generatedData); // asynchronous out-param.
 
     CryptoPlugin* cryptoPlugin = m_cryptoPlugins.value(cryptosystemProviderName);
     if (cryptoPlugin == Q_NULLPTR) {
@@ -1428,11 +1783,26 @@ Daemon::ApiImpl::RequestProcessor::updateCipherSession(
                       QLatin1String("No such cryptographic service provider plugin exists"));
     }
 
-    return cryptoPlugin->updateCipherSession(
+    QFutureWatcher<DataResult> *watcher = new QFutureWatcher<DataResult>(this);
+    QFuture<DataResult> future = QtConcurrent::run(
+                m_requestQueue->controller()->threadPoolForPlugin(cryptosystemProviderName).data(),
+                CryptoPluginWrapper::updateCipherSession,
+                cryptoPlugin,
                 callerPid,
                 data,
-                cipherSessionToken,
-                generatedData);
+                cipherSessionToken);
+
+    watcher->setFuture(future);
+    connect(watcher, &QFutureWatcher<DataResult>::finished, [=] {
+        watcher->deleteLater();
+        DataResult dr = watcher->future().result();
+        QVariantList outParams;
+        outParams << QVariant::fromValue<Result>(dr.result);
+        outParams << QVariant::fromValue<QByteArray>(dr.data);
+        m_requestQueue->requestFinished(requestId, outParams);
+    });
+
+    return Result(Result::Pending);
 }
 
 Result
@@ -1446,6 +1816,8 @@ Daemon::ApiImpl::RequestProcessor::finaliseCipherSession(
         bool *verified)
 {
     Q_UNUSED(requestId); // TODO: Access Control
+    Q_UNUSED(generatedData); // asynchronous out-param.
+    Q_UNUSED(verified);      // asynchronous out-param.
 
     CryptoPlugin* cryptoPlugin = m_cryptoPlugins.value(cryptosystemProviderName);
     if (cryptoPlugin == Q_NULLPTR) {
@@ -1453,12 +1825,27 @@ Daemon::ApiImpl::RequestProcessor::finaliseCipherSession(
                       QLatin1String("No such cryptographic service provider plugin exists"));
     }
 
-    return cryptoPlugin->finaliseCipherSession(
+    QFutureWatcher<VerifiedDataResult> *watcher = new QFutureWatcher<VerifiedDataResult>(this);
+    QFuture<VerifiedDataResult> future = QtConcurrent::run(
+                m_requestQueue->controller()->threadPoolForPlugin(cryptosystemProviderName).data(),
+                CryptoPluginWrapper::finaliseCipherSession,
+                cryptoPlugin,
                 callerPid,
                 data,
-                cipherSessionToken,
-                generatedData,
-                verified);
+                cipherSessionToken);
+
+    watcher->setFuture(future);
+    connect(watcher, &QFutureWatcher<VerifiedDataResult>::finished, [=] {
+        watcher->deleteLater();
+        VerifiedDataResult vdr = watcher->future().result();
+        QVariantList outParams;
+        outParams << QVariant::fromValue<Result>(vdr.result);
+        outParams << QVariant::fromValue<QByteArray>(vdr.data);
+        outParams << QVariant::fromValue<bool>(vdr.verified);
+        m_requestQueue->requestFinished(requestId, outParams);
+    });
+
+    return Result(Result::Pending);
 }
 
 Result
