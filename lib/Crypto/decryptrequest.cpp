@@ -179,6 +179,64 @@ void DecryptRequest::setPadding(Sailfish::Crypto::CryptoManager::EncryptionPaddi
 }
 
 /*!
+ * \brief Returns the authentication data for the decrypt operation
+ */
+QByteArray DecryptRequest::authenticationData() const
+{
+    Q_D(const DecryptRequest);
+    return d->m_authenticationData;
+}
+
+/*!
+ * \brief Sets the authentication data for the decrypt operation
+ *
+ * This is only required if the \a blockMode is \l blockMode is
+ * \l{Sailfish::Crypto::CryptoManager::}{BlockModeCcm} or
+ * \l{Sailfish::Crypto::CryptoManager::}{BlockModeGcm}.
+ */
+void DecryptRequest::setAuthenticationData(const QByteArray &data)
+{
+    Q_D(DecryptRequest);
+    if (d->m_status != Request::Active && d->m_authenticationData != data) {
+        d->m_authenticationData = data;
+        if (d->m_status == Request::Finished) {
+            d->m_status = Request::Inactive;
+            emit statusChanged();
+        }
+        emit authenticationDataChanged();
+    }
+}
+
+/*!
+ * \brief Returns the tag for the decrypt operation
+ */
+QByteArray DecryptRequest::tag() const
+{
+    Q_D(const DecryptRequest);
+    return d->m_tag;
+}
+
+/*!
+ * \brief Sets the tag for the decrypt operation
+ *
+ * This is only required if the \l blockMode is
+ * \l{Sailfish::Crypto::CryptoManager::}{BlockModeCcm} or
+ * \l{Sailfish::Crypto::CryptoManager::}{BlockModeGcm}.
+ */
+void DecryptRequest::setTag(const QByteArray &tag)
+{
+    Q_D(DecryptRequest);
+    if (d->m_status != Request::Active && d->m_tag != tag) {
+        d->m_tag = tag;
+        if (d->m_status == Request::Finished) {
+            d->m_status = Request::Inactive;
+            emit statusChanged();
+        }
+        emit tagChanged();
+    }
+}
+
+/*!
  * \brief Returns the name of the crypto plugin which the client wishes to perform the decryption operation
  */
 QString DecryptRequest::cryptoPluginName() const
@@ -252,13 +310,22 @@ void DecryptRequest::startRequest()
             emit resultChanged();
         }
 
-        QDBusPendingReply<Result, QByteArray> reply =
-                d->m_manager->d_ptr->decrypt(d->m_data,
-                                             d->m_initialisationVector,
-                                             d->m_key,
-                                             d->m_blockMode,
-                                             d->m_padding,
-                                             d->m_cryptoPluginName);
+        QDBusPendingReply<Result, QByteArray> reply = (d->m_blockMode == CryptoManager::BlockModeGcm)
+                ? d->m_manager->d_ptr->authenticatedDecrypt(d->m_data,
+                                                            d->m_initialisationVector,
+                                                            d->m_key,
+                                                            d->m_blockMode,
+                                                            d->m_padding,
+                                                            d->m_authenticationData,
+                                                            d->m_tag,
+                                                            d->m_cryptoPluginName)
+                : d->m_manager->d_ptr->decrypt(d->m_data,
+                                               d->m_initialisationVector,
+                                               d->m_key,
+                                               d->m_blockMode,
+                                               d->m_padding,
+                                               d->m_cryptoPluginName);
+
         if (!reply.isValid() && !reply.error().message().isEmpty()) {
             d->m_status = Request::Finished;
             d->m_result = Result(Result::CryptoManagerNotInitialisedError,
