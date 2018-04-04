@@ -17,6 +17,7 @@
 #include "Crypto/keypairgenerationparameters.h"
 #include "Crypto/keyderivationparameters.h"
 #include "Crypto/interactionparameters.h"
+#include "Crypto/lockcoderequest.h"
 
 #include "CryptoImpl/crypto_p.h"
 
@@ -64,7 +65,7 @@ public:
                      bool autotestMode,
                      Sailfish::Crypto::Daemon::ApiImpl::CryptoRequestQueue *parent = Q_NULLPTR);
 
-    bool loadPlugins(const QString &pluginDir);
+    bool loadPlugins();
     QMap<QString, Sailfish::Crypto::CryptoPlugin*> plugins() const;
     bool lockPlugins();
     bool unlockPlugins(const QByteArray &unlockCode);
@@ -226,6 +227,27 @@ public:
             QByteArray *generatedData,
             bool *verified);
 
+    Sailfish::Crypto::Result modifyLockCode(
+            pid_t callerPid,
+            quint64 requestId,
+            Sailfish::Crypto::LockCodeRequest::LockCodeTargetType lockCodeTargetType,
+            const QString &lockCodeTarget,
+            const Sailfish::Crypto::InteractionParameters &interactionParameters);
+
+    Sailfish::Crypto::Result provideLockCode(
+            pid_t callerPid,
+            quint64 requestId,
+            Sailfish::Crypto::LockCodeRequest::LockCodeTargetType lockCodeTargetType,
+            const QString &lockCodeTarget,
+            const Sailfish::Crypto::InteractionParameters &interactionParameters);
+
+    Sailfish::Crypto::Result forgetLockCode(
+            pid_t callerPid,
+            quint64 requestId,
+            Sailfish::Crypto::LockCodeRequest::LockCodeTargetType lockCodeTargetType,
+            const QString &lockCodeTarget,
+            const Sailfish::Crypto::InteractionParameters &interactionParameters);
+
 public Q_SLOTS:
     void secretsStoreKeyCompleted(
             quint64 requestId,
@@ -253,6 +275,10 @@ public Q_SLOTS:
             quint64 requestId,
             const Sailfish::Secrets::Result &result,
             const QByteArray &userInput);
+
+    void secretsCryptoPluginLockCodeRequestCompleted(
+            quint64 requestId,
+            const Sailfish::Secrets::Result &result);
 
 private:
     struct PendingRequest {
@@ -383,6 +409,7 @@ private:
     QMap<QString, Sailfish::Crypto::CryptoPlugin*> m_cryptoPlugins;
     QMap<quint64, Sailfish::Crypto::Daemon::ApiImpl::RequestProcessor::PendingRequest> m_pendingRequests;
     bool m_autotestMode;
+    bool loadPlugins(const QString &pluginDir);
 };
 
 } // namespace ApiImpl

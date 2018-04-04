@@ -7,6 +7,7 @@
 
 #include "plugin.h"
 #include "evp_p.h"
+#include "evp_helpers_p.h"
 
 #include "Crypto/cryptomanager.h"
 
@@ -64,11 +65,7 @@ Daemon::Plugins::OpenSslPlugin::encryptSecret(
     QCryptographicHash ivHash(QCryptographicHash::Sha256);
     ivHash.addData(key);
     QByteArray initVector = ivHash.result();
-    if (initVector.size() > 16) {
-        initVector.chop(initVector.size() - 16);
-    } else while (initVector.size() < 16) {
-        initVector.append('\0');
-    }
+    initVector.resize(16);
 
     // encrypt plaintext
     QByteArray ciphertext = aes_encrypt_plaintext(plaintext, key, initVector);
@@ -93,11 +90,7 @@ Daemon::Plugins::OpenSslPlugin::decryptSecret(
     QCryptographicHash ivHash(QCryptographicHash::Sha256);
     ivHash.addData(key);
     QByteArray initVector = ivHash.result();
-    if (initVector.size() > 16) {
-        initVector.chop(initVector.size() - 16);
-    } else while (initVector.size() < 16) {
-        initVector.append('\0');
-    }
+    initVector.resize(16);
 
     // decrypt ciphertext
     QByteArray decrypted = aes_decrypt_ciphertext(encrypted, key, initVector);
@@ -119,7 +112,7 @@ Daemon::Plugins::OpenSslPlugin::aes_encrypt_plaintext(
 {
     QByteArray encryptedData;
     unsigned char *encrypted = NULL;
-    int size = osslevp_aes_encrypt_plaintext(Sailfish::Crypto::CryptoManager::BlockModeCbc,
+    int size = osslevp_aes_encrypt_plaintext(getEvpCipher(Sailfish::Crypto::CryptoManager::BlockModeCbc, key.size()),
                                              (const unsigned char *)init_vector.constData(),
                                              (const unsigned char *)key.constData(),
                                              key.size(),
@@ -143,7 +136,7 @@ Daemon::Plugins::OpenSslPlugin::aes_decrypt_ciphertext(
 {
     QByteArray decryptedData;
     unsigned char *decrypted = NULL;
-    int size = osslevp_aes_decrypt_ciphertext(Sailfish::Crypto::CryptoManager::BlockModeCbc,
+    int size = osslevp_aes_decrypt_ciphertext(getEvpCipher(Sailfish::Crypto::CryptoManager::BlockModeCbc, key.size()),
                                               (const unsigned char *)init_vector.constData(),
                                               (const unsigned char *)key.constData(),
                                               key.size(),

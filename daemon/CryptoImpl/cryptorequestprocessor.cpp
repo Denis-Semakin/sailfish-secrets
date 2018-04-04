@@ -18,6 +18,7 @@
 #include <QtCore/QDir>
 #include <QtCore/QPluginLoader>
 #include <QtCore/QObject>
+#include <QtCore/QCoreApplication>
 
 namespace {
     Sailfish::Crypto::Result transformSecretsResult(const Sailfish::Secrets::Result &result) {
@@ -83,10 +84,12 @@ Daemon::ApiImpl::RequestProcessor::RequestProcessor(
             this, &Daemon::ApiImpl::RequestProcessor::secretsDeleteStoredKeyMetadataCompleted);
     connect(m_secrets, &Sailfish::Secrets::Daemon::ApiImpl::SecretsRequestQueue::userInputCompleted,
             this, &Daemon::ApiImpl::RequestProcessor::secretsUserInputCompleted);
+    connect(m_secrets, &Sailfish::Secrets::Daemon::ApiImpl::SecretsRequestQueue::cryptoPluginLockCodeRequestCompleted,
+            this, &Daemon::ApiImpl::RequestProcessor::secretsCryptoPluginLockCodeRequestCompleted);
 }
 
 bool
-Daemon::ApiImpl::RequestProcessor::loadPlugins(const QString &pluginDir)
+Daemon::ApiImpl::RequestProcessor::loadPlugins()
 {
     // First, see if any of the EncryptedStorage plugins from Secrets are also
     // Crypto plugins (providing generateAndStoreKey() functionality internally).
@@ -98,7 +101,7 @@ Daemon::ApiImpl::RequestProcessor::loadPlugins(const QString &pluginDir)
             if (cryptoPlugin->name().isEmpty() || m_cryptoPlugins.contains(cryptoPlugin->name())) {
                 qCDebug(lcSailfishCryptoDaemon) << "ignoring crypto storage plugin:" << it.key() << "with duplicate name:" << cryptoPlugin->name();
             } else if (cryptoPlugin->name().endsWith(QStringLiteral(".test"), Qt::CaseInsensitive) != m_autotestMode) {
-                qCDebug(lcSailfishCryptoDaemon) << "ignoring crypto storage plugin:" << it.key() << "due to mode";
+                qCDebug(lcSailfishCryptoDaemon) << "ignoring crypto storage plugin:" << it.key() << "because of testing mode mismatch";
             } else {
                 qCDebug(lcSailfishCryptoDaemon) << "loading crypto storage plugin:" << it.key();
                 m_cryptoPlugins.insert(it.key(), cryptoPlugin);
@@ -106,11 +109,33 @@ Daemon::ApiImpl::RequestProcessor::loadPlugins(const QString &pluginDir)
         }
     }
 
-    qCDebug(lcSailfishCryptoDaemon) << "Loading crypto plugins from directory:" << pluginDir;
+    QStringList paths = QCoreApplication::libraryPaths();
+    bool result = true;
+
+    Q_FOREACH(const QString &path, paths) {
+        if (!loadPlugins(path)) {
+            result = false;
+        }
+    }
+
+    return result;
+}
+
+bool
+Daemon::ApiImpl::RequestProcessor::loadPlugins(const QString &pluginDir)
+{
+    qCDebug(lcSailfishCryptoDaemon) << "Loading Crypto plugins from directory:" << pluginDir;
     QDir dir(pluginDir);
-    Q_FOREACH (const QString &pluginFile, dir.entryList(QDir::Files | QDir::NoDot | QDir::NoDotDot, QDir::Name)) {
+    Q_FOREACH (const QFileInfo &file, dir.entryInfoList(QDir::Files | QDir::NoDot | QDir::NoDotDot, QDir::Name)) {
+        const QString fileName = file.fileName();
+
+        // Don't even try to load files which don't look like libraries
+        if (!fileName.startsWith("lib") || !fileName.contains(".so")) {
+            continue;
+        }
+
         // load the plugin and query it for its data.
-        Sailfish::Secrets::Daemon::ApiImpl::PluginHelper loader(pluginFile, m_autotestMode);
+        Sailfish::Secrets::Daemon::ApiImpl::PluginHelper loader(file.absoluteFilePath(), m_autotestMode);
         QObject *plugin = loader.instance();
         if (!loader.storeAs<CryptoPlugin>(plugin, &m_cryptoPlugins, lcSailfishCryptoDaemon)) {
             loader.reportFailure(lcSailfishCryptoDaemon);
@@ -1436,6 +1461,128 @@ Daemon::ApiImpl::RequestProcessor::finaliseCipherSession(
                 verified);
 }
 
+Result
+Daemon::ApiImpl::RequestProcessor::modifyLockCode(
+        pid_t callerPid,
+        quint64 requestId,
+        LockCodeRequest::LockCodeTargetType lockCodeTargetType,
+        const QString &lockCodeTarget,
+        const InteractionParameters &interactionParameters)
+{
+    Q_UNUSED(lockCodeTargetType); // ExtensionPlugin is the only supported type currently.
+
+    if (!m_cryptoPlugins.contains(lockCodeTarget)) {
+        return Result(Result::InvalidCryptographicServiceProvider,
+                      QStringLiteral("Invalid crypto plugin name specified as lock code target"));
+    }
+
+    // We call to the secrets side in order to perform the user interaction flows.
+    // The plugin interactions are implemented also on secrets side for simplicity.
+    Sailfish::Secrets::InteractionParameters uiParams;
+    uiParams.setPluginName(lockCodeTarget);
+    uiParams.setOperation(Sailfish::Secrets::InteractionParameters::ModifyLockPlugin);
+    uiParams.setAuthenticationPluginName(interactionParameters.authenticationPluginName());
+    uiParams.setPromptText(interactionParameters.promptText());
+    uiParams.setInputType(static_cast<Sailfish::Secrets::InteractionParameters::InputType>(interactionParameters.inputType()));
+    uiParams.setEchoMode(static_cast<Sailfish::Secrets::InteractionParameters::EchoMode>(interactionParameters.echoMode()));
+    Result retn = transformSecretsResult(m_secrets->modifyCryptoPluginLockCode(callerPid, requestId, lockCodeTarget, uiParams));
+    if (retn.code() == Result::Pending) {
+        // asynchronous flow required, will call back to secretsCryptoPluginLockCodeRequestCompleted().
+        m_pendingRequests.insert(requestId,
+                                 Daemon::ApiImpl::RequestProcessor::PendingRequest(
+                                     callerPid,
+                                     requestId,
+                                     Daemon::ApiImpl::ModifyLockCodeRequest,
+                                     QVariantList() << QVariant::fromValue<pid_t>(callerPid)
+                                                    << QVariant::fromValue<LockCodeRequest::LockCodeTargetType>(lockCodeTargetType)
+                                                    << QVariant::fromValue<QString>(lockCodeTarget)
+                                                    << QVariant::fromValue<InteractionParameters>(interactionParameters)));
+    }
+
+    return retn;
+}
+
+Result
+Daemon::ApiImpl::RequestProcessor::provideLockCode(
+        pid_t callerPid,
+        quint64 requestId,
+        LockCodeRequest::LockCodeTargetType lockCodeTargetType,
+        const QString &lockCodeTarget,
+        const Sailfish::Crypto::InteractionParameters &interactionParameters)
+{
+    Q_UNUSED(lockCodeTargetType); // ExtensionPlugin is the only supported type currently.
+
+    if (!m_cryptoPlugins.contains(lockCodeTarget)) {
+        return Result(Result::InvalidCryptographicServiceProvider,
+                      QStringLiteral("Invalid crypto plugin name specified as lock code target"));
+    }
+
+    // We call to the secrets side in order to perform the user interaction flows.
+    // The plugin interactions are implemented also on secrets side for simplicity.
+    Sailfish::Secrets::InteractionParameters uiParams;
+    uiParams.setPluginName(lockCodeTarget);
+    uiParams.setOperation(Sailfish::Secrets::InteractionParameters::UnlockPlugin);
+    uiParams.setAuthenticationPluginName(interactionParameters.authenticationPluginName());
+    uiParams.setPromptText(interactionParameters.promptText());
+    uiParams.setInputType(static_cast<Sailfish::Secrets::InteractionParameters::InputType>(interactionParameters.inputType()));
+    uiParams.setEchoMode(static_cast<Sailfish::Secrets::InteractionParameters::EchoMode>(interactionParameters.echoMode()));
+    Result retn = transformSecretsResult(m_secrets->provideCryptoPluginLockCode(callerPid, requestId, lockCodeTarget, uiParams));
+    if (retn.code() == Result::Pending) {
+        // asynchronous flow required, will call back to secretsCryptoPluginLockCodeRequestCompleted().
+        m_pendingRequests.insert(requestId,
+                                 Daemon::ApiImpl::RequestProcessor::PendingRequest(
+                                     callerPid,
+                                     requestId,
+                                     Daemon::ApiImpl::ProvideLockCodeRequest,
+                                     QVariantList() << QVariant::fromValue<pid_t>(callerPid)
+                                                    << QVariant::fromValue<LockCodeRequest::LockCodeTargetType>(lockCodeTargetType)
+                                                    << QVariant::fromValue<QString>(lockCodeTarget)
+                                                    << QVariant::fromValue<InteractionParameters>(interactionParameters)));
+    }
+
+    return retn;
+}
+
+Result
+Daemon::ApiImpl::RequestProcessor::forgetLockCode(
+        pid_t callerPid,
+        quint64 requestId,
+        LockCodeRequest::LockCodeTargetType lockCodeTargetType,
+        const QString &lockCodeTarget,
+        const Sailfish::Crypto::InteractionParameters &interactionParameters)
+{
+    Q_UNUSED(lockCodeTargetType); // ExtensionPlugin is the only supported type currently.
+
+    if (!m_cryptoPlugins.contains(lockCodeTarget)) {
+        return Result(Result::InvalidCryptographicServiceProvider,
+                      QStringLiteral("Invalid crypto plugin name specified as lock code target"));
+    }
+
+    // We call to the secrets side in order to perform the user interaction flows.
+    // The plugin interactions are implemented also on secrets side for simplicity.
+    Sailfish::Secrets::InteractionParameters uiParams;
+    uiParams.setPluginName(lockCodeTarget);
+    uiParams.setOperation(Sailfish::Secrets::InteractionParameters::LockPlugin);
+    uiParams.setAuthenticationPluginName(interactionParameters.authenticationPluginName());
+    uiParams.setPromptText(interactionParameters.promptText());
+    uiParams.setInputType(static_cast<Sailfish::Secrets::InteractionParameters::InputType>(interactionParameters.inputType()));
+    uiParams.setEchoMode(static_cast<Sailfish::Secrets::InteractionParameters::EchoMode>(interactionParameters.echoMode()));
+    Result retn = transformSecretsResult(m_secrets->forgetCryptoPluginLockCode(callerPid, requestId, lockCodeTarget, uiParams));
+    if (retn.code() == Result::Pending) {
+        // asynchronous flow required, will call back to secretsCryptoPluginLockCodeRequestCompleted().
+        m_pendingRequests.insert(requestId,
+                                 Daemon::ApiImpl::RequestProcessor::PendingRequest(
+                                     callerPid,
+                                     requestId,
+                                     Daemon::ApiImpl::ForgetLockCodeRequest,
+                                     QVariantList() << QVariant::fromValue<pid_t>(callerPid)
+                                                    << QVariant::fromValue<LockCodeRequest::LockCodeTargetType>(lockCodeTargetType)
+                                                    << QVariant::fromValue<QString>(lockCodeTarget)
+                                                    << QVariant::fromValue<InteractionParameters>(interactionParameters)));
+    }
+
+    return retn;
+}
 
 // asynchronous operation (retrieve stored key) has completed.
 void Daemon::ApiImpl::RequestProcessor::secretsStoredKeyCompleted(
@@ -1675,5 +1822,37 @@ void Daemon::ApiImpl::RequestProcessor::secretsUserInputCompleted(
         }
     } else {
         qCWarning(lcSailfishCryptoDaemon) << "Secrets completed userInput() operation for unknown request:" << requestId;
+    }
+}
+
+// asynchronous operation (crypto plugin lock code request) has completed.
+void Daemon::ApiImpl::RequestProcessor::secretsCryptoPluginLockCodeRequestCompleted(
+        quint64 requestId,
+        const Sailfish::Secrets::Result &result)
+{
+    // look up the pending request in our list
+    if (m_pendingRequests.contains(requestId)) {
+        // transform the error code.
+        Result returnResult(transformSecretsResult(result));
+
+        // call the appropriate method to complete the request
+        Daemon::ApiImpl::RequestProcessor::PendingRequest pr = m_pendingRequests.take(requestId);
+        switch (pr.requestType) {
+            case ModifyLockCodeRequest:   // flow on
+            case ProvideLockCodeRequest:  // flow on
+            case ForgetLockCodeRequest: {
+                // nothing more to do, return the result directly.
+                QList<QVariant> outParams;
+                outParams << QVariant::fromValue<Result>(returnResult);
+                m_requestQueue->requestFinished(requestId, outParams);
+                break;
+            }
+            default: {
+                qCWarning(lcSailfishCryptoDaemon) << "Secrets completed crypto plugin lock code operation for request:" << requestId << "of invalid type:" << pr.requestType;
+                break;
+            }
+        }
+    } else {
+        qCWarning(lcSailfishCryptoDaemon) << "Secrets completed crypto plugin lock code operation for unknown request:" << requestId;
     }
 }

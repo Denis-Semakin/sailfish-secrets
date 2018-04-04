@@ -315,6 +315,7 @@ bool Database::open(
 
     const QString databaseFile = databaseDir.absoluteFilePath(databaseFilename);
     const bool databasePreexisting = QFile::exists(databaseFile);
+    qCDebug(lcSailfishSecretsDaemonSqlite) << "Attempting to open database file:" << databaseFile << ", pre-existing =" << databasePreexisting;
 
     m_database = QSqlDatabase::addDatabase(databaseDriver, connectionName);
     m_database.setDatabaseName(databaseFile);
@@ -352,6 +353,12 @@ bool Database::open(
 
     qCDebug(lcSailfishSecretsDaemonSqlite) << "Opened secrets database:" << databaseFile << "Locale:" << m_localeName;
     return true;
+}
+
+void Database::close()
+{
+    m_database.close();
+    m_preparedQueries.clear();
 }
 
 Database::operator QSqlDatabase &()
