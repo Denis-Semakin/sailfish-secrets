@@ -125,6 +125,7 @@ public:
         DigestShake128      = 34,
         DigestShake256      = 35,
         DigestGost94        = 40,
+	// For GOST2 applets
 	DigestGost12_256    = 41,
 	DigestGost12_512    = 42,
         DigestBlake         = 50,

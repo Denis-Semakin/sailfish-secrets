@@ -214,9 +214,11 @@ cp -R lib/Crypto/doc/html/* %{buildroot}/%{_docdir}/Sailfish/Crypto/
 %defattr(-,root,root,-)
 /opt/tests/Sailfish/Crypto/tst_crypto
 /opt/tests/Sailfish/Crypto/tst_cryptorequests
+/opt/tests/Sailfish/Crypto/tst_cryptokirequests
 /opt/tests/Sailfish/Crypto/tst_cryptosecrets
 /opt/tests/Sailfish/Crypto/tst_evp
 %{_libdir}/Sailfish/Crypto/libsailfishcrypto-testopenssl.so
+%{_libdir}/Sailfish/Crypto/libsailfishcrypto-testcryptoki.so
 
 %files -n libsailfishcryptoplugin
 %defattr(-,root,root,-)

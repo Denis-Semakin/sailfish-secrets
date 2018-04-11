@@ -62,6 +62,7 @@ protected:
     friend class RsaKeyPairGenerationParameters;
     friend class DsaKeyPairGenerationParameters;
     friend class DhKeyPairGenerationParameters;
+    friend class GostKeyPairGenerationParameters;
 };
 
 class SAILFISH_CRYPTO_API EcKeyPairGenerationParameters : public KeyPairGenerationParameters {

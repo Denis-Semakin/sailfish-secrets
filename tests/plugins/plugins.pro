@@ -4,4 +4,5 @@ SUBDIRS += \
     $$PWD/testsqliteplugin \
     $$PWD/testopensslplugin \
     $$PWD/testsqlcipherplugin \
-    $$PWD/testopensslcryptoplugin
+    $$PWD/testopensslcryptoplugin \
+    $$PWD/testcryptokiplugin

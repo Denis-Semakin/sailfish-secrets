@@ -77,7 +77,8 @@ using namespace Sailfish::Crypto;
         }                                                                   \
     } while (0)
 
-#define DEFAULT_TEST_CRYPTO_PLUGIN_NAME CryptoManager::DefaultCryptoPluginName + QLatin1String(".test")
+//#define DEFAULT_TEST_CRYPTO_PLUGIN_NAME CryptoManager::DefaultCryptoPluginName + QLatin1String(".test")
+#define DEFAULT_TEST_CRYPTO_PLUGIN_NAME "org.sailfishos.crypto.plugin.crypto.token" + QLatin1String(".test")
 #define DEFAULT_TEST_CRYPTO_STORAGE_PLUGIN_NAME Sailfish::Secrets::SecretManager::DefaultEncryptedStoragePluginName + QLatin1String(".test")
 #define IN_APP_TEST_AUTHENTICATION_PLUGIN Sailfish::Secrets::SecretManager::InAppAuthenticationPluginName + QLatin1String(".test")
 

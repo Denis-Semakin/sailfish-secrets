@@ -27,6 +27,7 @@
 #include "Crypto/certificate.h"
 #include "Crypto/generaterandomdatarequest.h"
 #include "Crypto/seedrandomdatageneratorrequest.h"
+#include "Crypto/lockcoderequest.h"
 #include "cryptokiplugin.h"
 
 #define bufferSize	(4 * 4096)
@@ -62,6 +63,95 @@ Daemon::Plugins::CryptokiPlugin::~CryptokiPlugin()
 
 }
 
+QVector<CryptoManager::Algorithm>
+Daemon::Plugins::CryptokiPlugin::supportedAlgorithms() const
+{
+    QVector<CryptoManager::Algorithm> retn;
+    retn.append(CryptoManager::AlgorithmGost);
+
+    return retn;
+}
+
+QMap<CryptoManager::Algorithm, QVector<CryptoManager::BlockMode> >
+Daemon::Plugins::CryptokiPlugin::supportedBlockModes() const
+{
+    QMap<CryptoManager::Algorithm, QVector<CryptoManager::BlockMode> > retn;
+    retn.insert(CryptoManager::AlgorithmAes,
+		QVector<CryptoManager::BlockMode>()
+                       << CryptoManager::BlockModeCustom);
+
+    return retn;
+}
+
+QMap<CryptoManager::Algorithm, QVector<CryptoManager::EncryptionPadding> >
+Daemon::Plugins::CryptokiPlugin::supportedEncryptionPaddings() const
+{
+    QMap<CryptoManager::Algorithm, QVector<CryptoManager::EncryptionPadding> > retn;
+    retn.insert(CryptoManager::AlgorithmAes, QVector<CryptoManager::EncryptionPadding>()
+		<< CryptoManager::EncryptionPaddingNone);
+
+    return retn;
+}
+
+QMap<CryptoManager::Algorithm, QVector<CryptoManager::SignaturePadding> >
+Daemon::Plugins::CryptokiPlugin::supportedSignaturePaddings() const
+{
+    QMap<CryptoManager::Algorithm, QVector<CryptoManager::SignaturePadding> > retn;
+    retn.insert(CryptoManager::AlgorithmGost,
+                QVector<CryptoManager::SignaturePadding>()
+		<< CryptoManager::SignaturePaddingNone);
+
+    return retn;
+}
+
+QMap<CryptoManager::Algorithm, QVector<CryptoManager::DigestFunction> >
+Daemon::Plugins::CryptokiPlugin::supportedDigests() const
+{
+    QMap<CryptoManager::Algorithm, QVector<CryptoManager::DigestFunction> > retn;
+    retn.insert(CryptoManager::AlgorithmGost,
+		QVector<CryptoManager::DigestFunction>()
+		<< CryptoManager::DigestGost94
+                << CryptoManager::DigestGost12_256
+                << CryptoManager::DigestGost12_512);
+
+    return retn;
+}
+
+QMap<CryptoManager::Algorithm, QVector<CryptoManager::MessageAuthenticationCode> >
+Daemon::Plugins::CryptokiPlugin::supportedMessageAuthenticationCodes() const
+{
+    QMap<CryptoManager::Algorithm, QVector<CryptoManager::MessageAuthenticationCode> > retn;
+    retn.insert(CryptoManager::AlgorithmGost,
+		QVector<CryptoManager::MessageAuthenticationCode>()
+		<< CryptoManager::MacHmac);
+
+    return retn;
+}
+
+QMap<CryptoManager::Algorithm, QVector<CryptoManager::KeyDerivationFunction> >
+Daemon::Plugins::CryptokiPlugin::supportedKeyDerivationFunctions() const
+{
+    QMap<CryptoManager::Algorithm, QVector<CryptoManager::KeyDerivationFunction> > retn;
+    retn.insert(CryptoManager::AlgorithmGost,
+		QVector<CryptoManager::KeyDerivationFunction>()
+		<< CryptoManager::KdfCustom);
+
+    return retn;
+}
+
+QMap<CryptoManager::Algorithm, CryptoManager::Operations>
+Daemon::Plugins::CryptokiPlugin::supportedOperations() const
+{
+    QMap<CryptoManager::Algorithm, CryptoManager::Operations> retn;
+    retn.insert(CryptoManager::AlgorithmGost,
+		CryptoManager::OperationEncrypt |
+		CryptoManager::OperationDecrypt |
+		CryptoManager::OperationSign    |
+		CryptoManager::OperationVerify);
+
+    return retn;
+}
+
 Result
 Daemon::Plugins::CryptokiPlugin::seedRandomDataGenerator(
         quint64 callerIdent,
@@ -73,6 +163,8 @@ Daemon::Plugins::CryptokiPlugin::seedRandomDataGenerator(
     Q_UNUSED(csprngEngineName)
     Q_UNUSED(seedData)
     Q_UNUSED(entropyEstimate)
+
+    qWarning() << "DDD: seedRandomDataGenerator";
 
     return Result(Result::Succeeded);
 }
@@ -88,6 +180,8 @@ Daemon::Plugins::CryptokiPlugin::generateAndStoreKey(
     Q_UNUSED(kpgParams);
     Q_UNUSED(skdfParams);
 
+    qWarning() << "DDD: generateAndStoreKey";
+
     CK_BBOOL		bToken = TRUE;
     CK_BBOOL		bTrue = CK_TRUE;
     CK_BBOOL		bFalse = CK_FALSE;
@@ -100,7 +194,8 @@ Daemon::Plugins::CryptokiPlugin::generateAndStoreKey(
     // example
     CK_ATTRIBUTE privKeyAttribs[] = {
         { CKA_TOKEN, (CK_VOID_PTR)&bToken, sizeof(bToken) }, // in token
-	// Secret Key label
+
+	//CKM_GOSTR3410_KEY_PAIR_GEN,// Secret Key label
         { CKA_LABEL, (CK_VOID_PTR)"Private key", (CK_ULONG)strlen("Private key") },
 	// Key pair type. rfc 4357
         { CKA_GOSTR3410_PARAMS, (CK_VOID_PTR)STR_CRYPTO_PRO_A, sizeof(STR_CRYPTO_PRO_A) },
@@ -138,7 +233,7 @@ Daemon::Plugins::CryptokiPlugin::generateAndStoreKey(
 			       &hPublicKey, &hPrivateKey));
     if (ret != CKR_OK)
     {
-	qCCritical(lcLibLoader) << "Error: " << loader->CKErr2Str(ret);
+	qCCritical(lcLibLoader) << __func__ << "Error: " << loader->CKErr2Str(ret);
 	return Result(Result::Failed);
     }
 
@@ -164,6 +259,8 @@ Daemon::Plugins::CryptokiPlugin::storedKey(
     CK_ULONG		KeyobjCount = 0;
     CK_ULONG		KeyClass;
     CK_BBOOL		bTrue = CK_TRUE;
+
+    qWarning() << "DDD: storedKey";
 
     // Object
     CK_ULONG KeyType = CKK_RSA;	//Temporary RSA, in future test GOST
@@ -191,7 +288,7 @@ Daemon::Plugins::CryptokiPlugin::storedKey(
 						 sizeof(KeySearchAttribs) / sizeof(CK_ATTRIBUTE)));
     if (ret != CKR_OK)
     {
-	qCCritical(lcLibLoader) << "Error: " << loader->CKErr2Str(ret);
+	qCCritical(lcLibLoader) << __func__ << "Error: " << loader->CKErr2Str(ret);
 	return Result(Result::Failed);
     }
 
@@ -199,19 +296,19 @@ Daemon::Plugins::CryptokiPlugin::storedKey(
 					    &KeyHandle, 1, &KeyobjCount));
     if (ret != CKR_OK)
     {
-	qCCritical(lcLibLoader) << "Error: " << loader->CKErr2Str(ret);
+	qCCritical(lcLibLoader) << __func__ << "Error: " << loader->CKErr2Str(ret);
 	return Result(Result::Failed);
     }
 
     ret = P11LOADER_FUNC(C_FindObjectsFinal(loader->getSession()));
     if (ret != CKR_OK)
     {
-	qCCritical(lcLibLoader) << "Error: " << loader->CKErr2Str(ret);
+	qCCritical(lcLibLoader) << __func__ << "Error: " << loader->CKErr2Str(ret);
 	return Result(Result::Failed);
     }
 
     if (!KeyobjCount) {
-	    qCCritical(lcLibLoader) << "No key found";
+	    qCCritical(lcLibLoader) << __func__ << "No key found";
 	    return Result(Result::Failed);
     }
 
@@ -234,6 +331,7 @@ Key
 Daemon::Plugins::CryptokiPlugin::getFullKey(
         const Sailfish::Crypto::Key &key)
 {
+	qWarning() << "DDD: getFullKey";
     return key;
 }
 
@@ -244,19 +342,50 @@ Daemon::Plugins::CryptokiPlugin::generateRandomData(
             quint64 numberBytes,
             QByteArray *randomData)
 {
-	Q_UNUSED(callerIdent);
-	Q_UNUSED(csprngEngineName);
+    Q_UNUSED(callerIdent);
+    Q_UNUSED(csprngEngineName);
+    //Q_UNUSED(randomData)
+    unsigned char buf[2048] = {0};
 
-	CK_RV ret = P11LOADER_FUNC(C_GenerateRandom(loader->getSession(),
-			reinterpret_cast<unsigned char *>(randomData->data()),
+	qWarning() << "DDD: generateRandomData";
+
+    if (loader)
+	    qWarning() << "loader != NULL";
+    else {
+	    qWarning() << "loader == NULL, create it! :((";
+	    bool ret = unlock("12345678");
+	    qWarning() << "ret = "  << ret;
+    }
+
+    qWarning() << "numberBytes:" << numberBytes
+	    << "randomData size" << randomData->size();
+    //numberBytes = 16;
+
+    if (randomData == nullptr)
+    {
+	qWarning() << "randomData == nullptr";
+	return Result(Result::Failed);
+    }
+
+    randomData->reserve(numberBytes);
+
+    CK_RV ret = P11LOADER_FUNC(C_GenerateRandom(loader->getSession(),
+			buf,
+			//reinterpret_cast<unsigned char *>(randomData->data()),
 			numberBytes));
-	if (ret != CKR_OK)
-	{
-		qCCritical(lcLibLoader) << "Error: " << loader->CKErr2Str(ret);
-		return Result(Result::Failed);
-	}
+    if (ret != CKR_OK)
+    {
+        qCCritical(lcLibLoader) << __func__ << "Error: " << loader->CKErr2Str(ret);
+        return Result(Result::Failed);
+    }
 
-	return Result(Result::Succeeded);
+    for (unsigned int i = 0; i < numberBytes; i++)
+	qWarning() << "c - " << buf[i];
+
+    qWarning() << "generateRandomData exit DDD";
+    //randomData->append(buf);
+
+    return Result(Result::Succeeded);
 }
 
 Result
@@ -282,6 +411,7 @@ Daemon::Plugins::CryptokiPlugin::generateKey(
     Q_UNUSED(skdfParams);
     Q_UNUSED(key);
 
+    qWarning() << "DDD: generateKey";
     CK_BBOOL	bTrue = CK_TRUE;
 
     if (kpgParams.keyPairType() != KeyPairGenerationParameters::KeyPairUnknown)
@@ -292,6 +422,8 @@ Daemon::Plugins::CryptokiPlugin::generateKey(
 	CK_MECHANISM	mech = {
 	    CKM_GOSTR3410_KEY_PAIR_GEN, NULL_PTR, 0
 	};
+
+	qWarning() << "DDD: NOT ! KeyPairUnknown";
 
 	// Secret Key attributes
 	// Note! All attributes can be and should be set up by &kpgParams for
@@ -338,7 +470,7 @@ Daemon::Plugins::CryptokiPlugin::generateKey(
 				      &hPublicKey, &hPrivateKey));
 	if (ret != CKR_OK)
 	{
-		qCCritical(lcLibLoader) << "Error: " << loader->CKErr2Str(ret);
+		qCCritical(lcLibLoader) << "C_GenerateKeyPair Error: " << loader->CKErr2Str(ret);
 		return Result(Result::Failed);
 	}
 
@@ -349,6 +481,7 @@ Daemon::Plugins::CryptokiPlugin::generateKey(
 
 	key->setPublicKey(PublicKeyData);
 	key->setPrivateKey(PrivateKeyData);
+	qWarning() << "DDD: End of key generarion";
     }
     else
     {
@@ -360,13 +493,16 @@ Daemon::Plugins::CryptokiPlugin::generateKey(
 		{CKA_EXTRACTABLE, &bTrue, sizeof(bTrue)}
 	};
 
+	qWarning() << "DDD: KeyPairUnknown !!!";
+
 	const CK_RV ret = P11LOADER_FUNC(C_GenerateKey(loader->getSession(),
-						      &mech, KeyTemplate,
-			sizeof(KeyTemplate) / sizeof(CK_ATTRIBUTE),
-			&SessionKeyHandle));
+						       &mech,
+						       KeyTemplate,
+						       sizeof(KeyTemplate) / sizeof(CK_ATTRIBUTE),
+						       &SessionKeyHandle));
 	if (ret != CKR_OK)
 	{
-	    qCCritical(lcLibLoader) << "Error: " << loader->CKErr2Str(ret);
+	    qCCritical(lcLibLoader) << "C_GenerateKey Error: " << loader->CKErr2Str(ret);
 	    return Result(Result::Failed);
 	}
 
@@ -387,24 +523,30 @@ Daemon::Plugins::CryptokiPlugin::sign(
 {
     Q_UNUSED(padding)
     Q_UNUSED(digestFunction)
-//    if (digestFunction != CryptoManager::DigestFunction::DigestGost)
+    //if (digestFunction != CryptoManager::DigestFunction::DigestGost)
 //	    return Result(Result::UnsupportedOperation,
 //			 QLatin1String("The plugin supports only GOST"));
 
     char sign[SIGNSIZE];
+
+    qWarning() << "DDD: sign";
     CK_ULONG nSignatureLength = sizeof(sign);
 
-    //NOTE: One should choose a correct mech from in params
+    //NOTE: One should choose a correct mechanism from in params
     CK_OBJECT_HANDLE	hPrivateKey = key.privateKey().toULong();
     CK_MECHANISM	mech = {
-        CKM_GOSTR3410_WITH_GOSTR3411_2012_256, nullptr, 0
+	CKM_GOSTR3410_KEY_PAIR_GEN,
+        //CKM_GOSTR3410_WITH_GOSTR3411_2012_256,
+	nullptr, 0
     };
 
+    qWarning() << "DDD: sign";
+    qCritical() << "DDD: sign";
     CK_RV ret = P11LOADER_FUNC(C_SignInit(loader->getSession(),
 					  &mech, hPrivateKey));
     if (ret != CKR_OK)
     {
-	qCCritical(lcLibLoader) << "Error: " << loader->CKErr2Str(ret);
+	qCCritical(lcLibLoader) << "C_SignInit Error: " << loader->CKErr2Str(ret);
 	return Result(Result::Failed);
     }
 
@@ -418,7 +560,7 @@ Daemon::Plugins::CryptokiPlugin::sign(
 					  operationSize));
 	if (ret != CKR_OK)
 	{
-	    qCCritical(lcLibLoader) << "Error: " << loader->CKErr2Str(ret);
+	    qCCritical(lcLibLoader) << "C_SignUpdate Error: " << loader->CKErr2Str(ret);
 	    return Result(Result::Failed);
 	}
 	dataSize -= operationSize;
@@ -430,7 +572,7 @@ Daemon::Plugins::CryptokiPlugin::sign(
 				     &nSignatureLength));
     if (ret != CKR_OK)
     {
-	qCCritical(lcLibLoader) << "Error: " << loader->CKErr2Str(ret);
+	qCCritical(lcLibLoader) << "C_SignFinal Error: " << loader->CKErr2Str(ret);
 	return Result(Result::Failed);
     }
 
@@ -450,14 +592,16 @@ Daemon::Plugins::CryptokiPlugin::verify(
 {
     Q_UNUSED(padding)
     Q_UNUSED(digest)
-
+	qWarning() << "DDD: verify";
 //    if (digest != CryptoManager::DigestFunction::DigestGost)
 //	    return Result(Result::UnsupportedOperation,
 //			 QLatin1String("The plugin supports only GOST"));
 
     CK_OBJECT_HANDLE    hPublicKey = key.publicKey().toULong();
     CK_MECHANISM        mech = {
-	CKM_GOSTR3410_WITH_GOSTR3411_2012_256, nullptr, 0
+	CKM_GOSTR3410_KEY_PAIR_GEN,
+	//CKM_GOSTR3410_WITH_GOSTR3411_2012_256,
+	nullptr, 0
     };
 
     *verified = false;
@@ -466,7 +610,7 @@ Daemon::Plugins::CryptokiPlugin::verify(
 					    &mech, hPublicKey));
     if (ret != CKR_OK)
     {
-	qCCritical(lcLibLoader) << "Error: " << loader->CKErr2Str(ret);
+	qCCritical(lcLibLoader) << "C_VerifyInit Error: " << loader->CKErr2Str(ret);
 	return Result(Result::Failed);
     }
 
@@ -480,7 +624,7 @@ Daemon::Plugins::CryptokiPlugin::verify(
 					    operationSize));
 	if (ret != CKR_OK)
 	{
-	    qCCritical(lcLibLoader) << "Error: " << loader->CKErr2Str(ret);
+	    qCCritical(lcLibLoader) << "C_VerifyUpdate Error: " << loader->CKErr2Str(ret);
 	    return Result(Result::Failed);
 	}
 	dataSize -= operationSize;
@@ -493,13 +637,12 @@ Daemon::Plugins::CryptokiPlugin::verify(
 				       signature.length()));
     if (ret != CKR_OK)
     {
-	*verified = false;
 	if (ret == CKR_SIGNATURE_INVALID)
 	{
 	    return Result(Result::Succeeded);
 	}
 
-	qCCritical(lcLibLoader) << "Error: " << loader->CKErr2Str(ret);
+	qCCritical(lcLibLoader) << "C_VerifyFinal Error: " << loader->CKErr2Str(ret);
 	return Result(Result::Failed);
     }
 
@@ -519,7 +662,7 @@ Daemon::Plugins::CryptokiPlugin::encrypt(
 {
     Q_UNUSED(blockMode);
     Q_UNUSED(padding);
-
+	qWarning() << "DDD: encrypt";
     long unsigned int iv_length = static_cast<long unsigned int>(iv.length());
     std::vector<char> iv_data(iv.length());
     memcpy(iv_data.data(), iv.data(), iv.length());
@@ -534,7 +677,7 @@ Daemon::Plugins::CryptokiPlugin::encrypt(
 					     key.secretKey().toULong()));
     if (ret != CKR_OK)
     {
-	qCCritical(lcLibLoader) << "Error: " << loader->CKErr2Str(ret);
+	qCCritical(lcLibLoader) << __func__ << "Error: " << loader->CKErr2Str(ret);
 	return Result(Result::Failed);
     }
 
@@ -554,7 +697,7 @@ Daemon::Plugins::CryptokiPlugin::encrypt(
 
     if (ret != CKR_OK)
     {
-	qCCritical(lcLibLoader) << "Error: " << loader->CKErr2Str(ret);
+	qCCritical(lcLibLoader) << __func__ << "Error: " << loader->CKErr2Str(ret);
 	return Result(Result::Failed);
     }
 
@@ -572,7 +715,7 @@ Daemon::Plugins::CryptokiPlugin::decrypt(
 {
     Q_UNUSED(blockMode);
     Q_UNUSED(padding);
-
+	qWarning() << "DDD: decrypt";
     long unsigned int iv_length = static_cast<long unsigned int>(iv.length());
     std::vector<char> iv_data(iv.length());
     memcpy(iv_data.data(), iv.data(), iv.length());
@@ -587,7 +730,7 @@ Daemon::Plugins::CryptokiPlugin::decrypt(
 					     key.secretKey().toULong()));
     if (ret != CKR_OK)
     {
-	qCCritical(lcLibLoader) << "Error: " << loader->CKErr2Str(ret);
+	qCCritical(lcLibLoader) << __func__ << "Error: " << loader->CKErr2Str(ret);
 	return Result(Result::Failed);
     }
 
@@ -606,7 +749,7 @@ Daemon::Plugins::CryptokiPlugin::decrypt(
 
     if (ret != CKR_OK)
     {
-	qCCritical(lcLibLoader) << "Error: " << loader->CKErr2Str(ret);
+	qCCritical(lcLibLoader) << __func__ << "Error: " << loader->CKErr2Str(ret);
 	return Result(Result::Failed);
     }
 
@@ -644,6 +787,7 @@ Daemon::Plugins::CryptokiPlugin::calculateDigest(
 	     len = SIGNSIZE;
 	     break;
 	default:
+	     qWarning() << "The Cryptoki plugin supports ONLY GOST";
 	     return Result(Result::UnsupportedOperation,
 			   QLatin1String("The Cryptoki plugin supports ONLY GOST"));
     }
@@ -651,7 +795,7 @@ Daemon::Plugins::CryptokiPlugin::calculateDigest(
     CK_RV ret = P11LOADER_FUNC(C_DigestInit(loader->getSession(), &mech));
     if (ret != CKR_OK)
     {
-	qCCritical(lcLibLoader) << "Error: " << loader->CKErr2Str(ret);
+	qCCritical(lcLibLoader) << "C_DigestInit Error: " << loader->CKErr2Str(ret);
 	return Result(Result::Failed);
     }
 
@@ -665,7 +809,7 @@ Daemon::Plugins::CryptokiPlugin::calculateDigest(
 					    operationSize));
 	if (ret != CKR_OK)
 	{
-	    qCCritical(lcLibLoader) << "Error: " << loader->CKErr2Str(ret);
+	    qCCritical(lcLibLoader) << "C_DigestUpdate Error: " << loader->CKErr2Str(ret);
 	    return Result(Result::Failed);
 	}
 	dataSize -= operationSize;
@@ -676,12 +820,94 @@ Daemon::Plugins::CryptokiPlugin::calculateDigest(
 				       &len));
     if (ret != CKR_OK)
     {
-	qCCritical(lcLibLoader) << "Error: " << loader->CKErr2Str(ret);
+	qCCritical(lcLibLoader) << "C_DigestFinal Error: " << loader->CKErr2Str(ret);
 	return Result(Result::Failed);
     }
 
+    for (int j = 0; j < SIGNSIZE; j++)
+	    fprintf(stderr, "%.2x", dig[j]);
+
     digest->append(dig, len);
 
+    return Result(Result::Succeeded);
+}
+
+Result
+Daemon::Plugins::CryptokiPlugin::initialiseCipherSession(
+    quint64 clientId,
+    const QByteArray &iv,
+    const Key &key, // or keyreference, i.e. Key(keyName)
+    CryptoManager::Operation operation,
+    CryptoManager::BlockMode blockMode,
+    CryptoManager::EncryptionPadding encryptionPadding,
+    CryptoManager::SignaturePadding signaturePadding,
+    CryptoManager::DigestFunction digestFunction,
+    quint32 *cipherSessionToken,
+    QByteArray *generatedIV)
+{
+	Q_UNUSED(clientId)
+	Q_UNUSED(iv)
+	Q_UNUSED(operation)
+	Q_UNUSED(blockMode)
+	Q_UNUSED(encryptionPadding)
+	Q_UNUSED(signaturePadding)
+	Q_UNUSED(digestFunction)
+	Q_UNUSED(cipherSessionToken)
+	Q_UNUSED(generatedIV)
+    Key fullKey = getFullKey(key);
+    if (fullKey.secretKey().isEmpty()) {
+        return Result(Result::EmptySecretKey,
+		      QLatin1String("Cannot create a cipher session with empty secret key"));
+    }
+
+    return Result(Result::Succeeded);
+}
+
+Result
+Daemon::Plugins::CryptokiPlugin::updateCipherSessionAuthentication(
+    quint64 clientId,
+    const QByteArray &authenticationData,
+    quint32 cipherSessionToken)
+{
+	Q_UNUSED(clientId)
+	Q_UNUSED(authenticationData)
+	Q_UNUSED(cipherSessionToken)
+    //if (!m_cipherSessions.contains(clientId)
+//	|| !m_cipherSessions[clientId].contains(cipherSessionToken)) {
+  //      return Result(Result::CryptoPluginCipherSessionError,
+//		      QLatin1String("Unknown cipher session token provided"));
+  //  }
+
+    return Result(Result::Succeeded);
+}
+
+Result
+Daemon::Plugins::CryptokiPlugin::updateCipherSession(
+    quint64 clientId,
+    const QByteArray &data,
+    quint32 cipherSessionToken,
+    QByteArray *generatedData)
+{
+    Q_UNUSED(clientId)
+    Q_UNUSED(data)
+    Q_UNUSED(cipherSessionToken)
+    Q_UNUSED(generatedData)
+    return Result(Result::Succeeded);
+}
+
+Result
+Daemon::Plugins::CryptokiPlugin::finaliseCipherSession(
+    quint64 clientId,
+    const QByteArray &data,
+    quint32 cipherSessionToken,
+    QByteArray *generatedData,
+    bool *verified)
+{
+    Q_UNUSED(clientId)
+    Q_UNUSED(data)
+    Q_UNUSED(cipherSessionToken)
+    Q_UNUSED(generatedData)
+    Q_UNUSED(verified)
     return Result(Result::Succeeded);
 }
 
@@ -706,6 +932,7 @@ Daemon::Plugins::CryptokiPlugin::lock()
 bool
 Daemon::Plugins::CryptokiPlugin::unlock(const QByteArray &lockCode)
 {
+    qWarning() << "DDD: unlock";
     loader.reset(new LibLoader);
 
     return loader->unlock(lockCode);

@@ -19,6 +19,7 @@
 
 #include "libloader.h"
 
+Q_LOGGING_CATEGORY(lcLibLoader, "lcLibLoader")
 namespace {
 
 // This is pre-defined path for common purpose OpenSC PKCS11 library
@@ -238,6 +239,7 @@ LibLoader::unlock(const QByteArray &code)
 {
     CK_RV	ret;
     CK_ULONG	slotCount = 0;
+    void *h;
 
     // Steps are: C_Initialize(), C_GetSlotList(), C_GetTokenInfo
     //		  C_OpenSession(), C_Login()
@@ -246,16 +248,19 @@ LibLoader::unlock(const QByteArray &code)
    {
 	qCCritical(lcLibLoader) << "Trying to load: " << lib;
 
-	Handle handle(dlopen(lib, RTLD_LAZY), dlclose);
-	if (handle == nullptr)
+	//Handle handle(dlopen(lib, RTLD_LAZY), dlclose);
+	//if (handle == nullptr)
+	h = dlopen(lib, RTLD_LAZY);
+	if ( h == nullptr )
 	{
 	    qCCritical(lcLibLoader) << "Load library failed: " << lib;
 	    continue;
 	}
 
 	CK_C_GetFunctionList flist =
-		reinterpret_cast<CK_C_GetFunctionList>(dlsym(handle.get(),
-							 "C_GetFunctionList"));
+		//reinterpret_cast<CK_C_GetFunctionList>(dlsym(handle.get(),
+		//					 "C_GetFunctionList"));
+		reinterpret_cast<CK_C_GetFunctionList>(dlsym(h,"C_GetFunctionList"));
 	if (flist == nullptr)
 	{
 	    qCCritical(lcLibLoader) << "C_GetFunctionList not found in module";
@@ -321,7 +326,7 @@ LibLoader::unlock(const QByteArray &code)
 	    continue;
 	}
 
-	m_Handle = std::move(handle);
+	//m_Handle = std::move(handle);
 	m_Initialized = true;
 	break;
     } //for (...)
@@ -340,7 +345,7 @@ LibLoader::setLockCode(const QByteArray &oldCode, const QByteArray &newCode)
 					   newPin, newCode.length()));
     if (ret != CKR_OK)
     {
-	qCCritical(lcLibLoader) << "Error: " << CKErr2Str(ret);
+	qCCritical(lcLibLoader) << __func__ <<"Error: " << CKErr2Str(ret);
 	return false;
     }
 
