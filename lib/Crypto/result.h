@@ -33,6 +33,7 @@ public:
         Pending   = 1,
         Failed    = 2
     };
+    Q_ENUM(ResultCode)
 
     enum ErrorCode {
         NoError = 0,
@@ -46,6 +47,8 @@ public:
         InvalidKeyIdentifier,
         DuplicateKeyIdentifier,
         CryptoManagerNotInitialisedError,
+        InvalidInitializationVector,
+        InvalidAuthenticationTag,
 
         UnsupportedOperation = 20,
         UnsupportedBlockMode,
@@ -64,9 +67,13 @@ public:
         CryptoPluginRandomDataError,
         CryptoPluginCipherSessionError,
         CryptoPluginKeyGenerationError,
+        CryptoPluginKeyImportError,
         CryptoPluginDigestError,
         CryptoPluginSigningError,
         CryptoPluginVerificationError,
+        CryptoPluginAuthenticationTagError,
+        CryptoPluginInvalidCipherSessionToken,
+        CryptoPluginIncorrectPassphrase,
 
         NetworkError = 98,
         NetworkSslError = 99,
@@ -124,6 +131,7 @@ public:
 
         OtherError = 1024,
     };
+    Q_ENUM(ErrorCode)
 
     Result(Sailfish::Crypto::Result::ResultCode resultCode = Succeeded);
     Result(Sailfish::Crypto::Result::ErrorCode errorCode, const QString &errorMessage);

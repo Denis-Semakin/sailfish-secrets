@@ -320,7 +320,7 @@ public:
     Q_FLAG(Operations)
 
     CryptoManager(QObject *parent = Q_NULLPTR);
-    ~CryptoManager();
+    virtual ~CryptoManager();
 
     bool isInitialised() const;
 
@@ -335,6 +335,9 @@ private:
     friend class GenerateKeyRequest;
     friend class GenerateRandomDataRequest;
     friend class GenerateStoredKeyRequest;
+    friend class ImportKeyRequest;
+    friend class ImportStoredKeyRequest;
+    friend class GenerateInitializationVectorRequest;
     friend class LockCodeRequest;
     friend class PluginInfoRequest;
     friend class SeedRandomDataGeneratorRequest;

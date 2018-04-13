@@ -61,6 +61,12 @@ public:
     // TODO: add a method (and corresponding Request type) to generateRandomNumber
     // perhaps with range limits, precision parameters, etc.
 
+    QDBusPendingReply<Sailfish::Crypto::Result, QByteArray> generateInitializationVector(
+            Sailfish::Crypto::CryptoManager::Algorithm algorithm,
+            Sailfish::Crypto::CryptoManager::BlockMode blockMode,
+            int keySize,
+            const QString &cryptosystemProviderName);
+
     QDBusPendingReply<Sailfish::Crypto::Result, bool> validateCertificateChain(
             const QVector<Sailfish::Crypto::Certificate> &chain,
             const QString &cryptosystemProviderName);
@@ -75,6 +81,17 @@ public:
             const Sailfish::Crypto::Key &keyTemplate,
             const Sailfish::Crypto::KeyPairGenerationParameters &pkgParams,
             const Sailfish::Crypto::KeyDerivationParameters &skdfParams,
+            const Sailfish::Crypto::InteractionParameters &uiParams,
+            const QString &cryptosystemProviderName,
+            const QString &storageProviderName);
+
+    QDBusPendingReply<Sailfish::Crypto::Result, Sailfish::Crypto::Key> importKey(
+            const Sailfish::Crypto::Key &key,
+            const Sailfish::Crypto::InteractionParameters &uiParams,
+            const QString &cryptosystemProviderName);
+
+    QDBusPendingReply<Sailfish::Crypto::Result, Sailfish::Crypto::Key> importStoredKey(
+            const Sailfish::Crypto::Key &key,
             const Sailfish::Crypto::InteractionParameters &uiParams,
             const QString &cryptosystemProviderName,
             const QString &storageProviderName);
@@ -109,23 +126,26 @@ public:
             Sailfish::Crypto::CryptoManager::DigestFunction digestFunction,
             const QString &cryptosystemProviderName);
 
-    QDBusPendingReply<Sailfish::Crypto::Result, QByteArray> encrypt(
+    QDBusPendingReply<Sailfish::Crypto::Result, QByteArray, QByteArray> encrypt(
             const QByteArray &data,
             const QByteArray &iv,
             const Sailfish::Crypto::Key &key, // or keyreference, i.e. Key(keyName)
             Sailfish::Crypto::CryptoManager::BlockMode blockMode,
             Sailfish::Crypto::CryptoManager::EncryptionPadding padding,
+            const QByteArray &authenticationData,
             const QString &cryptosystemProviderName);
 
-    QDBusPendingReply<Sailfish::Crypto::Result, QByteArray> decrypt(
+    QDBusPendingReply<Result, QByteArray, bool> decrypt(
             const QByteArray &data,
             const QByteArray &iv,
-            const Sailfish::Crypto::Key &key, // or keyreference, i.e. Key(keyName)
-            Sailfish::Crypto::CryptoManager::BlockMode blockMode,
-            Sailfish::Crypto::CryptoManager::EncryptionPadding padding,
+            const Key &key, // or keyreference, i.e. Key(keyName)
+            CryptoManager::BlockMode blockMode,
+            CryptoManager::EncryptionPadding padding,
+            const QByteArray &authenticationData,
+            const QByteArray &authenticationTag,
             const QString &cryptosystemProviderName);
 
-    QDBusPendingReply<Sailfish::Crypto::Result, quint32, QByteArray> initialiseCipherSession(
+    QDBusPendingReply<Result, quint32> initialiseCipherSession(
             const QByteArray &initialisationVector,
             const Sailfish::Crypto::Key &key, // or keyreference
             const Sailfish::Crypto::CryptoManager::Operation operation,

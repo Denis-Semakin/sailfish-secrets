@@ -1,6 +1,10 @@
+%global secretsdaemon sailfishsecretsdaemon
+%global secretsdaemon sailfish-secretsd
+%global user_unitdir %{_libdir}/systemd/user
+
 Name:       libsailfishsecrets
 Summary:    Sailfish OS secrets storage system functionality client library
-Version:    0.0.1
+Version:    0.0.4
 Release:    1
 Group:      System/Libraries
 License:    Proprietary
@@ -10,6 +14,8 @@ BuildRequires:  pkgconfig(Qt5Core)
 BuildRequires:  pkgconfig(Qt5Sql)
 BuildRequires:  pkgconfig(Qt5DBus)
 BuildRequires:	libp11-devel
+BuildRequires:  pkgconfig(qt5-boostable)
+BuildRequires:  qt5-qttools-linguist
 
 %description
 %{summary}.
@@ -34,10 +40,20 @@ BuildRequires:  qt5-tools
 %package tests
 Summary:    Unit tests for the Sailfish OS Secrets Library.
 Group:      System/Libraries
-BuildRequires:  pkgconfig(Qt5Test)
+BuildRequires:  pkgconfig(Qt5QuickTest)
+BuildRequires:  pkgconfig(libcrypto)
+Requires: qt5-qtdeclarative-import-qttest
+Requires: qt5-qtdeclarative-devel-tools
 Requires:   %{name} = %{version}-%{release}
 
 %description tests
+%{summary}.
+
+%package   -n sailfishsecrets-ts-devel
+Summary:   Translation source for Sailfish Secrets
+Group:     System/Applications
+
+%description -n sailfishsecrets-ts-devel
 %{summary}.
 
 %package -n libsailfishsecretsplugin
@@ -80,7 +96,7 @@ BuildRequires:  qt5-tools
 %package -n libsailfishcrypto-tests
 Summary:    Unit tests for the libsailfishcrypto library.
 Group:      System/Libraries
-BuildRequires:  pkgconfig(Qt5Test)
+BuildRequires: pkgconfig(Qt5QuickTest)
 Requires:   libsailfishcrypto = %{version}-%{release}
 
 %description -n libsailfishcrypto-tests
@@ -95,22 +111,29 @@ Requires:   libsailfishcrypto = %{version}-%{release}
 %description -n libsailfishcryptoplugin
 %{summary}.
 
-%package -n sailfishsecretsdaemon
+%package -n %{secretsdaemon}
 Summary:    Sailfish OS secrets daemon (example).
 Group:      Applications/System
 BuildRequires:  pkgconfig(Qt5Core)
 BuildRequires:  pkgconfig(Qt5DBus)
 BuildRequires:  pkgconfig(dbus-1)
+BuildRequires:  pkgconfig(libsystemd)
+BuildRequires:  pkgconfig(qt5-boostable)
 BuildRequires:  qt5-plugin-sqldriver-sqlite
-Requires:   %{name} = %{version}-%{release}
-Requires:   libsailfishcrypto = %{version}-%{release}
-Requires:   qt5-plugin-sqldriver-sqlcipher
+Requires:         %{name} = %{version}-%{release}
+Requires:         systemd
+Requires(preun):  systemd
+Requires(postun): systemd
+Requires(post):   systemd
+Requires:         mapplauncherd
+Requires:         libsailfishcrypto = %{version}-%{release}
+Requires:         qt5-plugin-sqldriver-sqlcipher
 
-%description -n sailfishsecretsdaemon
+%description -n %{secretsdaemon}
 Provides an example secrets storage and cryptographic operations system daemon service,
 which exposes functionality provided by libsailfishsecrets and libsailfishcrypto to clients via DBus.
 
-%package -n sailfishsecretsdaemonplugins
+%package -n %{secretsdaemon}plugins
 Summary:    Sailfish OS secrets daemon (example) plugins.
 Group:      Applications/System
 BuildRequires:  pkgconfig(Qt5Core)
@@ -119,9 +142,9 @@ BuildRequires:  pkgconfig(dbus-1)
 BuildRequires:  pkgconfig(libcrypto)
 BuildRequires:  qt5-plugin-sqldriver-sqlite
 Requires:   qt5-plugin-sqldriver-sqlcipher
-Requires:   sailfishsecretsdaemon = %{version}-%{release}
+Requires:   %{secretsdaemon} = %{version}-%{release}
 
-%description -n sailfishsecretsdaemonplugins
+%description -n %{secretsdaemon}plugins
 Provides a set of example secrets daemon plugins.
 
 %package -n sailfishcryptodaemonplugins
@@ -132,7 +155,7 @@ BuildRequires:  pkgconfig(Qt5DBus)
 BuildRequires:  pkgconfig(dbus-1)
 BuildRequires:  pkgconfig(libcrypto)
 BuildRequires:  qt5-plugin-sqldriver-sqlite
-Requires:   sailfishsecretsdaemon = %{version}-%{release}
+Requires:   %{secretsdaemon} = %{version}-%{release}
 Requires:   libsailfishcrypto = %{version}-%{release}
 
 %description -n sailfishcryptodaemonplugins
@@ -162,8 +185,17 @@ rm -rf %{buildroot}
 
 mkdir -p %{buildroot}/%{_docdir}/Sailfish/Secrets/
 mkdir -p %{buildroot}/%{_docdir}/Sailfish/Crypto/
+mkdir -p %{buildroot}/%{user_unitdir}/user-session.target.wants/
+mkdir -p %{buildroot}/%{_datadir}/dbus-1/services/
+mkdir -p %{buildroot}/%{_datadir}/mapplauncherd/privileges.d/
+
 cp -R lib/Secrets/doc/html/* %{buildroot}/%{_docdir}/Sailfish/Secrets/
 cp -R lib/Crypto/doc/html/* %{buildroot}/%{_docdir}/Sailfish/Crypto/
+install -m 0644 daemon/%{secretsdaemon}.service %{buildroot}/%{user_unitdir}
+install -m 0644 daemon/%{secretsdaemon}.privileges %{buildroot}/%{_datadir}/mapplauncherd/privileges.d/
+install -m 0644 daemon/org.sailfishos.secrets.daemon.discovery.service %{buildroot}/%{_datadir}/dbus-1/services/
+
+ln -s ../%{secretsdaemon}.service %{buildroot}/%{user_unitdir}/user-session.target.wants/%{secretsdaemon}.service
 
 %files
 %defattr(-,root,root,-)
@@ -181,14 +213,21 @@ cp -R lib/Crypto/doc/html/* %{buildroot}/%{_docdir}/Sailfish/Crypto/
 
 %files tests
 %defattr(-,root,root,-)
+/opt/tests/Sailfish/Secrets/authentication-client
 /opt/tests/Sailfish/Secrets/tst_secrets
 /opt/tests/Sailfish/Secrets/tst_secrets.qml
 /opt/tests/Sailfish/Secrets/tst_secretsrequests
 /opt/tests/Sailfish/Secrets/tst_secretsrequests.qml
 %{_libdir}/Sailfish/Secrets/libsailfishsecrets-testinappauth.so
+%{_libdir}/Sailfish/Secrets/libsailfishsecrets-testpasswordagentauth.so
 %{_libdir}/Sailfish/Secrets/libsailfishsecrets-testopenssl.so
 %{_libdir}/Sailfish/Secrets/libsailfishsecrets-testsqlcipher.so
 %{_libdir}/Sailfish/Secrets/libsailfishsecrets-testsqlite.so
+%{_datadir}/polkit-1/actions/org.sailfishos.secrets.policy
+
+%files -n sailfishsecrets-ts-devel
+%defattr(-,root,root,-)
+%{_datadir}/translations/source/sailfish-secrets.ts
 
 %files -n libsailfishsecretsplugin
 %defattr(-,root,root,-)
@@ -217,6 +256,7 @@ cp -R lib/Crypto/doc/html/* %{buildroot}/%{_docdir}/Sailfish/Crypto/
 /opt/tests/Sailfish/Crypto/tst_cryptokirequests
 /opt/tests/Sailfish/Crypto/tst_cryptosecrets
 /opt/tests/Sailfish/Crypto/tst_evp
+/opt/tests/Sailfish/Crypto/tst_qml_signing
 %{_libdir}/Sailfish/Crypto/libsailfishcrypto-testopenssl.so
 %{_libdir}/Sailfish/Crypto/libsailfishcrypto-testcryptoki.so
 
@@ -225,14 +265,20 @@ cp -R lib/Crypto/doc/html/* %{buildroot}/%{_docdir}/Sailfish/Crypto/
 %{_libdir}/qt5/qml/Sailfish/Crypto/libsailfishcryptoplugin.so
 %{_libdir}/qt5/qml/Sailfish/Crypto/qmldir
 
-%files -n sailfishsecretsdaemon
+%files -n %{secretsdaemon}
 %defattr(-,root,root,-)
 %{_bindir}/sailfishsecretsd
+%{_datadir}/translations/sailfish-secrets_eng_en.qm
+%{_datadir}/mapplauncherd/privileges.d/%{secretsdaemon}.privileges
+%{user_unitdir}/%{secretsdaemon}.service
+%{user_unitdir}/user-session.target.wants/%{secretsdaemon}.service
+%{_datadir}/dbus-1/services/org.sailfishos.secrets.daemon.discovery.service
 
-%files -n sailfishsecretsdaemonplugins
+%files -n %{secretsdaemon}plugins
 %defattr(-,root,root,-)
 %{_libdir}/Sailfish/Secrets/libsailfishsecrets-inappauth.so
 %{_libdir}/Sailfish/Secrets/libsailfishsecrets-openssl.so
+%{_libdir}/Sailfish/Secrets/libsailfishsecrets-passwordagentauth.so
 %{_libdir}/Sailfish/Secrets/libsailfishsecrets-sqlcipher.so
 %{_libdir}/Sailfish/Secrets/libsailfishsecrets-sqlite.so
 %{_libdir}/Sailfish/Crypto/libsailfishcryptoki.so
@@ -270,3 +316,14 @@ cp -R lib/Crypto/doc/html/* %{buildroot}/%{_docdir}/Sailfish/Crypto/
 %postun -n libsailfishcryptoplugin
 /sbin/ldconfig || :
 
+%post -n %{secretsdaemon}
+systemctl-user daemon-reload || :
+systemctl-user reload-or-try-restart %{secretsdaemon} || :
+
+%preun -n %{secretsdaemon}
+if [ "$1" -eq 0 ]; then
+    systemctl stop %{secretsdaemon} || :
+fi
+
+%postun -n %{secretsdaemon}
+systemctl daemon-reload || :

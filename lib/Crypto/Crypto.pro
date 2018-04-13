@@ -22,9 +22,12 @@ PUBLIC_HEADERS += \
     $$PWD/deletestoredkeyrequest.h \
     $$PWD/encryptrequest.h \
     $$PWD/extensionplugins.h \
+    $$PWD/generateinitializationvectorrequest.h \
     $$PWD/generatekeyrequest.h \
     $$PWD/generaterandomdatarequest.h \
     $$PWD/generatestoredkeyrequest.h \
+    $$PWD/importkeyrequest.h \
+    $$PWD/importstoredkeyrequest.h \
     $$PWD/interactionparameters.h \
     $$PWD/key.h \
     $$PWD/keyderivationparameters.h \
@@ -55,6 +58,7 @@ PRIVATE_HEADERS += \
     $$PWD/deletestoredkeyrequest_p.h \
     $$PWD/encryptrequest_p.h \
     $$PWD/extensionplugins_p.h \
+    $$PWD/generateinitializationvectorrequest_p.h \
     $$PWD/generatekeyrequest_p.h \
     $$PWD/generaterandomdatarequest_p.h \
     $$PWD/generatestoredkeyrequest_p.h \
@@ -87,9 +91,12 @@ SOURCES += \
     $$PWD/deletestoredkeyrequest.cpp \
     $$PWD/encryptrequest.cpp \
     $$PWD/extensionplugins.cpp \
+    $$PWD/generateinitializationvectorrequest.cpp \
     $$PWD/generatekeyrequest.cpp \
     $$PWD/generaterandomdatarequest.cpp \
     $$PWD/generatestoredkeyrequest.cpp \
+    $$PWD/importkeyrequest.cpp \
+    $$PWD/importstoredkeyrequest.cpp \
     $$PWD/interactionparameters.cpp \
     $$PWD/key.cpp \
     $$PWD/keyderivationparameters.cpp \
