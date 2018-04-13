@@ -124,10 +124,14 @@ public:
         DigestSha3_512      = 33,
         DigestShake128      = 34,
         DigestShake256      = 35,
+	// Hashes
         DigestGost94        = 40,
 	// For GOST2 applets
 	DigestGost12_256    = 41,
 	DigestGost12_512    = 42,
+	DigestSingData      = 43,
+	DigestSingHash      = 44,
+	DigestSingHMAC      = 45,
         DigestBlake         = 50,
         DigestBlake2,
         DigestBlake2b,

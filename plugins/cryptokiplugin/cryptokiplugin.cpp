@@ -45,9 +45,9 @@ namespace {
 	0x06, 0x07, 0x2A, 0x85, 0x03, 0x02, 0x02, 0x1E, 0x01
     };
 
-    CK_BYTE STR_CRYPTO_PRO_GOST28147_A[] = {
-	0x06, 0x07, 0x2a, 0x85, 0x03, 0x02, 0x02, 0x1f, 0x01
-    };
+    //CK_BYTE STR_CRYPTO_PRO_GOST28147_A[] = {
+	//0x06, 0x07, 0x2a, 0x85, 0x03, 0x02, 0x02, 0x1f, 0x01
+    //};
 
     const int SIGNSIZE = 64;
 } // anonymous namespace
@@ -407,14 +407,15 @@ Daemon::Plugins::CryptokiPlugin::generateKey(
             const KeyDerivationParameters &skdfParams,
             Key *key)
 {
-    Q_UNUSED(keyTemplate);
-    Q_UNUSED(skdfParams);
-    Q_UNUSED(key);
+    Q_UNUSED(keyTemplate)
+    Q_UNUSED(skdfParams)
+    Q_UNUSED(kpgParams)
+
 
     qWarning() << "DDD: generateKey";
     CK_BBOOL	bTrue = CK_TRUE;
 
-    if (kpgParams.keyPairType() != KeyPairGenerationParameters::KeyPairUnknown)
+    //if (kpgParams.keyPairType() != KeyPairGenerationParameters::KeyPairUnknown)
     {
 
 	CK_BBOOL	bToken = TRUE;
@@ -481,9 +482,10 @@ Daemon::Plugins::CryptokiPlugin::generateKey(
 
 	key->setPublicKey(PublicKeyData);
 	key->setPrivateKey(PrivateKeyData);
+	key->setName("DDD kkkk");
 	qWarning() << "DDD: End of key generarion";
     }
-    else
+    /*else
     {
 	CK_OBJECT_HANDLE SessionKeyHandle;
 	CK_MECHANISM mech = {CKM_GOST28147_KEY_GEN, NULL, 0};
@@ -508,7 +510,7 @@ Daemon::Plugins::CryptokiPlugin::generateKey(
 
 	const QByteArray KeyData = QByteArray::number(static_cast<qulonglong>(SessionKeyHandle));
 	key->setSecretKey(KeyData);
-    }
+    }*/
 
     return Result(Result::Succeeded);
 }
@@ -534,49 +536,83 @@ Daemon::Plugins::CryptokiPlugin::sign(
 
     //NOTE: One should choose a correct mechanism from in params
     CK_OBJECT_HANDLE	hPrivateKey = key.privateKey().toULong();
-    CK_MECHANISM	mech = {
-	CKM_GOSTR3410_KEY_PAIR_GEN,
-        //CKM_GOSTR3410_WITH_GOSTR3411_2012_256,
-	nullptr, 0
+    CK_MECHANISM	mech;
+
+    mech.pParameter = NULL_PTR;
+    mech.ulParameterLen = 0;
+
+    switch (digestFunction)
+    {
+    case CryptoManager::DigestFunction::DigestSingData:
+	mech.mechanism = CKM_GOSTR3410_WITH_GOSTR3411; //sing data
+	break;
+    case CryptoManager::DigestFunction::DigestSingHash:
+	mech.mechanism = CKM_GOSTR3410; //sign 32-bytes hash
+	break;
+    case CryptoManager::DigestFunction::DigestSingHMAC:
+	mech.mechanism = CKM_GOSTR3410_WITH_GOSTR3411_2012_256;
+	break;
+    default:
+	qWarning() << "Unknown mechanism:" << digestFunction;
+	break;
     };
 
-    qWarning() << "DDD: sign";
-    qCritical() << "DDD: sign";
+     qWarning() << "DDD: C_SignInit";
     CK_RV ret = P11LOADER_FUNC(C_SignInit(loader->getSession(),
 					  &mech, hPrivateKey));
+    CK_BYTE_PTR pSign = reinterpret_cast<CK_BYTE_PTR>(sign);
+
     if (ret != CKR_OK)
     {
 	qCCritical(lcLibLoader) << "C_SignInit Error: " << loader->CKErr2Str(ret);
 	return Result(Result::Failed);
     }
 
-    int dataSize = data.length();
-    unsigned char buf[bufferSize];
+    if (mech.mechanism == CKM_GOSTR3410_WITH_GOSTR3411)
+    {
+        int dataSize = data.length();
+	unsigned char buf[bufferSize];
 
-    while (dataSize > 0) {
-	int operationSize = dataSize >= bufferSize ? bufferSize : dataSize;
-	memcpy(buf, data.data(), operationSize);
-	ret = P11LOADER_FUNC(C_SignUpdate(loader->getSession(), buf,
-					  operationSize));
+	while (dataSize > 0)
+	{
+	    int operationSize = dataSize >= bufferSize ? bufferSize : dataSize;
+	    memcpy(buf, data.data(), operationSize);
+	    qWarning() << "DDD: C_SignUpdate";
+	    ret = P11LOADER_FUNC(C_SignUpdate(loader->getSession(), buf,
+					      operationSize));
+	    if (ret != CKR_OK)
+	    {
+	        qCCritical(lcLibLoader) << "C_SignUpdate Error: " << loader->CKErr2Str(ret);
+		return Result(Result::Failed);
+	    }
+            dataSize -= operationSize;
+	}
+
+	qWarning() << "DDD: C_SignFinal";
+	ret = P11LOADER_FUNC(C_SignFinal(loader->getSession(), pSign,
+					 &nSignatureLength));
+
 	if (ret != CKR_OK)
 	{
-	    qCCritical(lcLibLoader) << "C_SignUpdate Error: " << loader->CKErr2Str(ret);
+	    qCCritical(lcLibLoader) << "C_SignFinal Error: " << loader->CKErr2Str(ret);
+	    return Result(Result::Failed);
+        }
+    } else {
+        CK_BYTE hash_data[32];
+	memcpy(hash_data, data.data(), 32);
+	qWarning() << "DDD: C_Sign";
+	ret = P11LOADER_FUNC(C_Sign(loader->getSession(), hash_data,
+				    sizeof(hash_data),
+				    pSign, &nSignatureLength));
+	if (ret != CKR_OK)
+	{
+	    qCCritical(lcLibLoader) << "C_Sign Error: " << loader->CKErr2Str(ret);
 	    return Result(Result::Failed);
 	}
-	dataSize -= operationSize;
-    }
-
-    CK_BYTE_PTR pSign = reinterpret_cast<CK_BYTE_PTR>(sign);
-
-    ret = P11LOADER_FUNC(C_SignFinal(loader->getSession(), pSign,
-				     &nSignatureLength));
-    if (ret != CKR_OK)
-    {
-	qCCritical(lcLibLoader) << "C_SignFinal Error: " << loader->CKErr2Str(ret);
-	return Result(Result::Failed);
     }
 
     signature->append(sign, nSignatureLength);
+    qWarning() << "DDD Sing Succeeded";
 
     return Result(Result::Succeeded);
 }
@@ -591,17 +627,31 @@ Daemon::Plugins::CryptokiPlugin::verify(
             bool *verified)
 {
     Q_UNUSED(padding)
-    Q_UNUSED(digest)
 	qWarning() << "DDD: verify";
 //    if (digest != CryptoManager::DigestFunction::DigestGost)
 //	    return Result(Result::UnsupportedOperation,
 //			 QLatin1String("The plugin supports only GOST"));
 
     CK_OBJECT_HANDLE    hPublicKey = key.publicKey().toULong();
-    CK_MECHANISM        mech = {
-	CKM_GOSTR3410_KEY_PAIR_GEN,
-	//CKM_GOSTR3410_WITH_GOSTR3411_2012_256,
-	nullptr, 0
+    CK_MECHANISM	mech;
+
+    mech.pParameter = NULL_PTR;
+    mech.ulParameterLen = 0;
+
+    switch (digest)
+    {
+    case CryptoManager::DigestFunction::DigestSingData:
+	mech.mechanism = CKM_GOSTR3410_WITH_GOSTR3411; //sing data
+	break;
+    case CryptoManager::DigestFunction::DigestSingHash:
+	mech.mechanism = CKM_GOSTR3410; //sign 32-bytes hash
+	break;
+    case CryptoManager::DigestFunction::DigestSingHMAC:
+	mech.mechanism = CKM_GOSTR3410_WITH_GOSTR3411_2012_256;
+	break;
+    default:
+	qCWarning(lcLibLoader) << "Unknown mechanism:" << digest;
+	break;
     };
 
     *verified = false;
@@ -614,36 +664,55 @@ Daemon::Plugins::CryptokiPlugin::verify(
 	return Result(Result::Failed);
     }
 
-    int dataSize = data.length();
-    unsigned char buf[bufferSize];
-
-    while (dataSize > 0) {
-	int operationSize = dataSize >= bufferSize ? bufferSize : dataSize;
-	memcpy(buf, data.data(), operationSize);
-	ret = P11LOADER_FUNC(C_VerifyUpdate(loader->getSession(), buf,
-					    operationSize));
-	if (ret != CKR_OK)
-	{
-	    qCCritical(lcLibLoader) << "C_VerifyUpdate Error: " << loader->CKErr2Str(ret);
-	    return Result(Result::Failed);
-	}
-	dataSize -= operationSize;
-    }
-
     std::vector<unsigned char> sign(signature.length());
     memcpy(sign.data(), signature.data(), signature.length());
 
-    ret = P11LOADER_FUNC(C_VerifyFinal(loader->getSession(), sign.data(),
-				       signature.length()));
-    if (ret != CKR_OK)
+    if (mech.mechanism == CKM_GOSTR3410_WITH_GOSTR3411)
     {
-	if (ret == CKR_SIGNATURE_INVALID)
-	{
-	    return Result(Result::Succeeded);
-	}
+        int dataSize = data.length();
+	unsigned char buf[bufferSize];
 
-	qCCritical(lcLibLoader) << "C_VerifyFinal Error: " << loader->CKErr2Str(ret);
-	return Result(Result::Failed);
+        while (dataSize > 0) {
+	    int operationSize = dataSize >= bufferSize ? bufferSize : dataSize;
+	    memcpy(buf, data.data(), operationSize);
+	    ret = P11LOADER_FUNC(C_VerifyUpdate(loader->getSession(), buf,
+						operationSize));
+	    if (ret != CKR_OK)
+	    {
+	        qCCritical(lcLibLoader) << "C_VerifyUpdate Error: " << loader->CKErr2Str(ret);
+	        return Result(Result::Failed);
+	    }
+	    dataSize -= operationSize;
+        }
+
+        ret = P11LOADER_FUNC(C_VerifyFinal(loader->getSession(), sign.data(),
+					   signature.length()));
+        if (ret != CKR_OK)
+        {
+	    if (ret == CKR_SIGNATURE_INVALID)
+	    {
+	        return Result(Result::Succeeded);
+	    }
+
+	    qCCritical(lcLibLoader) << "C_VerifyFinal Error: " << loader->CKErr2Str(ret);
+	    return Result(Result::Failed);
+        }
+
+    } else {
+        CK_BYTE hash_data[32];
+	memcpy(hash_data, data.data(), 32);
+	ret = P11LOADER_FUNC(C_Verify(loader->getSession(), hash_data,
+				      sizeof(hash_data),
+				      sign.data(), signature.length()));
+        if (ret != CKR_OK)
+	{
+            if (ret == CKR_SIGNATURE_INVALID)
+	    {
+                return Result(Result::Succeeded);
+	    }
+	    qCCritical(lcLibLoader) << "C_VerifyFinal Error: " << loader->CKErr2Str(ret);
+	    return Result(Result::Failed);
+	}
     }
 
     *verified = true;

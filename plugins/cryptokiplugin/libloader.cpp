@@ -25,13 +25,15 @@ namespace {
 // This is pre-defined path for common purpose OpenSC PKCS11 library
 #define	DEFAULT_PKCS11_LIB_PATH	"/usr/lib/opensc-pkcs11.so"
 // This is path to Aladdin's PKCS11 library
-#define	ALADDIN_PKCS11_LIB_PATH	"/usr/lib/libjcPKCS11-2.so"
+#define	ALADDIN_PKCS11_LIB_PATH "/usr/lib/libjcPKCS11-2.so"
+#define RUTOKEN_PKCS11_LIB_PATH "/usr/lib/librtpkcs11ecp.so"
 
 #define CALL_P11LIB(func)	GetFunctions()->func
 
-const std::array<const char *, 2> PKCS11Libs = {
-	DEFAULT_PKCS11_LIB_PATH,
-	ALADDIN_PKCS11_LIB_PATH
+const std::array<const char *, 3> PKCS11Libs = {
+	RUTOKEN_PKCS11_LIB_PATH,
+	ALADDIN_PKCS11_LIB_PATH,
+	DEFAULT_PKCS11_LIB_PATH
 };
 
 } // anonymous namespace
