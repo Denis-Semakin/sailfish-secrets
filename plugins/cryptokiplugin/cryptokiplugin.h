@@ -22,7 +22,7 @@
 #include <QtCore/QCryptographicHash>
 #include <QtCore/QMap>
 
-#include "Crypto/extensionplugins.h"
+//#include "Crypto/extensionplugins.h"
 #include "libloader.h"
 #include "tk26.h"
 

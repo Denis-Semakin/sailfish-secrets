@@ -24,7 +24,7 @@
 #include <QLoggingCategory>
 
 #include "Crypto/key.h"
-#include "Crypto/certificate.h"
+//#include "Crypto/certificate.h"
 #include "Crypto/generaterandomdatarequest.h"
 #include "Crypto/seedrandomdatageneratorrequest.h"
 #include "Crypto/lockcoderequest.h"
